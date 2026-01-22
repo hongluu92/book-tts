@@ -219,17 +219,18 @@ export default function ReaderPage() {
     }
   }, [book, currentChapterIndex, findLastReadChapter])
 
-  // Reset TTS when chapter changes
+  // Reset TTS when chapter changes (this runs when chapter ID changes)
   useEffect(() => {
     if (currentChapter) {
-      console.log(`[ReaderPage] Chapter changed to: ${currentChapter.id}, resetting TTS`)
+      console.log(`[ReaderPage] Chapter changed to: ${currentChapter.id}, stopping TTS`)
+      // Stop TTS - the actual reset to start and saving will happen in the next effect when sentences load
       stop()
-      // TTS state will be reset by useTts hook when sentences change
     }
   }, [currentChapter?.id, stop])
 
   // Track previous chapter to detect changes
   const prevChapterIdRef = useRef<string | null>(null)
+  const isChapterChangeRef = useRef(false)
 
   // Resume from progress when chapter loads (after TTS reset)
   useEffect(() => {
@@ -238,6 +239,7 @@ export default function ReaderPage() {
     if (chapterChanged) {
       console.log(`[ReaderPage] Chapter changed from ${prevChapterIdRef.current} to ${currentChapter?.id}, resetting TTS and scrolling to top`)
       prevChapterIdRef.current = currentChapter?.id || null
+      isChapterChangeRef.current = true
       
       // Scroll to top of chapter
       if (mainRef.current) {
@@ -247,15 +249,40 @@ export default function ReaderPage() {
         })
       }
       
-      // Reset to start - progress will be applied in next effect if available
+      // Reset TTS to start of chapter
       if (sentences.length > 0) {
         seek(0)
       }
+      
+      // Save this chapter as last accessed with TTS at start
+      if (currentChapter?.id && sentences.length > 0) {
+        const firstSentence = sentences[0]
+        if (firstSentence) {
+          saveProgress({
+            bookId,
+            chapterId: currentChapter.id,
+            sentenceIndex: 0,
+            markerId: firstSentence.markerId,
+            ttsVoice: selectedVoice?.name,
+            ttsRate: rate,
+          })
+          
+          syncProgress({
+            chapterId: currentChapter.id,
+            sentenceIndex: 0,
+            markerId: firstSentence.markerId,
+            ttsVoice: selectedVoice?.name,
+            ttsRate: rate,
+          })
+        }
+      }
+      
       return
     }
 
-    // Only resume progress if we have sentences and we're at the start (after reset)
-    if (progress && sentences.length > 0 && currentSentenceIndex === 0) {
+    // Only resume progress if we have sentences and this is NOT a chapter change
+    // (chapter change already reset to start above)
+    if (!isChapterChangeRef.current && progress && sentences.length > 0 && currentSentenceIndex === 0) {
       const index = sentences.findIndex((s) => s.markerId === progress.markerId)
       if (index >= 0 && index > 0) {
         // Seek to saved position (but don't auto-play - iOS requires user interaction)
@@ -289,10 +316,15 @@ export default function ReaderPage() {
           setRate(progress.ttsRate)
         }
       }
-    } else if (sentences.length > 0 && currentSentenceIndex !== 0 && !progress) {
+    } else if (sentences.length > 0 && currentSentenceIndex !== 0 && !progress && !isChapterChangeRef.current) {
       // No progress for this chapter, ensure we're at the start
       console.log('[ReaderPage] No progress, resetting to start')
       seek(0)
+    }
+    
+    // Reset chapter change flag after processing
+    if (isChapterChangeRef.current) {
+      isChapterChangeRef.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [progress, sentences, currentChapter?.id, currentSentenceIndex])
@@ -740,8 +772,12 @@ export default function ReaderPage() {
             <div className="flex items-center justify-center gap-4">
               <button
                 onClick={() => {
+                  // Stop TTS
                   stop()
-                  setCurrentChapterIndex(Math.max(0, currentChapterIndex - 1))
+                  // Change chapter - this will trigger chapter change logic which resets TTS to start
+                  const newIndex = Math.max(0, currentChapterIndex - 1)
+                  setCurrentChapterIndex(newIndex)
+                  console.log(`[ReaderPage] Changed to previous chapter: ${newIndex}`)
                 }}
                 disabled={currentChapterIndex === 0}
                 className="px-4 py-2 bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
@@ -753,8 +789,12 @@ export default function ReaderPage() {
               </span>
               <button
                 onClick={() => {
+                  // Stop TTS
                   stop()
-                  setCurrentChapterIndex(Math.min(book.chapters.length - 1, currentChapterIndex + 1))
+                  // Change chapter - this will trigger chapter change logic which resets TTS to start
+                  const newIndex = Math.min(book.chapters.length - 1, currentChapterIndex + 1)
+                  setCurrentChapterIndex(newIndex)
+                  console.log(`[ReaderPage] Changed to next chapter: ${newIndex}`)
                 }}
                 disabled={currentChapterIndex === book.chapters.length - 1}
                 className="px-4 py-2 bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
