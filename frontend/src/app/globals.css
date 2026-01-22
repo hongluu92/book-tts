@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #1a1a1a;
+  --accent: #2563eb;
+  --muted: #6b7280;
+  --highlight-bg: #fef3c7;
+  --highlight-border: #fcd34d;
+}
+
+.dark {
+  --background: #0f172a;
+  --foreground: #f1f5f9;
+  --accent: #60a5fa;
+  --muted: #94a3b8;
+  --highlight-bg: #78350f;
+  --highlight-border: #f59e0b;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .tts-active {
+    @apply bg-highlight-bg border-l-4 border-highlight-border pl-1 pr-1 rounded-sm;
+    transition: background-color 200ms ease;
+  }
+}
+
+/* iOS Safe Area */
+@supports (padding: max(0px)) {
+  .safe-area-bottom {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+  
+  .safe-area-top {
+    padding-top: max(1rem, env(safe-area-inset-top));
+  }
+}
