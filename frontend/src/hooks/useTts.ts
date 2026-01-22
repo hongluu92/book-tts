@@ -88,8 +88,26 @@ export function useTts(options: UseTtsOptions) {
         speechSynthesis.onvoiceschanged = handleVoicesChanged
         
         return () => {
+          // Cleanup: stop TTS and remove event listener
+          if (engineRef.current) {
+            engineRef.current.cancel()
+            setIsPlaying(false)
+            setIsPaused(false)
+            isPlayingRef.current = false
+          }
+          
           if (speechSynthesis.onvoiceschanged === handleVoicesChanged) {
             speechSynthesis.onvoiceschanged = null
+          }
+        }
+      } else {
+        // Cleanup even if not supported
+        return () => {
+          if (engineRef.current) {
+            engineRef.current.cancel()
+            setIsPlaying(false)
+            setIsPaused(false)
+            isPlayingRef.current = false
           }
         }
       }

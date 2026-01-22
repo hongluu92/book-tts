@@ -37,6 +37,9 @@ export default function ReaderPage() {
   const params = useParams()
   const router = useRouter()
   const bookId = params.bookId as string
+  
+  // Track if component is mounted to prevent cleanup on initial mount
+  const isMountedRef = useRef(true)
   const [book, setBook] = useState<Book | null>(null)
   const [currentChapterIndex, setCurrentChapterIndex] = useState(0)
   const [chapterContent, setChapterContent] = useState<string>('')
@@ -141,7 +144,30 @@ export default function ReaderPage() {
     }
 
     loadBook()
-  }, [bookId])
+
+    // Cleanup: Stop TTS when component unmounts or route changes
+    return () => {
+      console.log('[ReaderPage] Component unmounting or route changing, stopping TTS')
+      stop()
+      isMountedRef.current = false
+    }
+  }, [bookId, stop])
+
+  // Additional cleanup on unmount (separate effect to ensure it runs)
+  useEffect(() => {
+    isMountedRef.current = true
+    
+    return () => {
+      console.log('[ReaderPage] Final cleanup on unmount, stopping TTS')
+      if (isMountedRef.current) {
+        stop()
+        // Also cancel speech synthesis directly as a safety measure
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+          speechSynthesis.cancel()
+        }
+      }
+    }
+  }, [stop])
 
   // Find the last read chapter
   const findLastReadChapter = useCallback(async () => {
@@ -555,6 +581,34 @@ export default function ReaderPage() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isPlaying, isPaused, play, pause, prev, next])
 
+  // Stop TTS when page becomes hidden (user switches tabs, minimizes, etc.)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden && isPlaying) {
+        console.log('[ReaderPage] Page hidden, stopping TTS')
+        stop()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [isPlaying, stop])
+
+  // Stop TTS when navigating away (beforeunload)
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      console.log('[ReaderPage] Before unload, stopping TTS')
+      stop()
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [stop])
+
   if (loading) {
     return (
       <ProtectedRoute>
@@ -580,7 +634,10 @@ export default function ReaderPage() {
       <div className="min-h-screen bg-white dark:bg-slate-900 flex flex-col">
         <header className="bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center justify-between">
           <button
-            onClick={() => router.push('/bookshelf')}
+            onClick={() => {
+              stop()
+              router.push('/bookshelf')
+            }}
             className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
           >
             ← Back
