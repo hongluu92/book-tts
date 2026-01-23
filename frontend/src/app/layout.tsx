@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter, Crimson_Text } from 'next/font/google'
 import './globals.css'
+import DevServiceWorkerCleaner from '@/components/DevServiceWorkerCleaner'
 
 const inter = Inter({ 
   subsets: ['latin'],
@@ -44,6 +45,7 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-title" content="EPUB Reader" />
       </head>
       <body className={`${inter.variable} ${crimsonText.variable} font-sans`}>
+        <DevServiceWorkerCleaner />
         {children}
       </body>
     </html>

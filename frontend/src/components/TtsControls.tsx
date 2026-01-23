@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { Play, Pause, ChevronLeft, ChevronRight, Search } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -167,17 +167,13 @@ export default function TtsControls({
             <div className="flex items-center gap-2">
               {/* Rate Dropdown - Opens upward */}
               <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={isDisabled}
-                    className="h-9 px-3 text-sm"
-                  >
-                    {rate.toFixed(2)}x
-                  </Button>
+                <DropdownMenuTrigger
+                  disabled={isDisabled}
+                  className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-9 px-3 text-sm')}
+                >
+                  {rate.toFixed(2)}x
                 </DropdownMenuTrigger>
-                <DropdownMenuContent side="top" align="end">
+                <DropdownMenuContent side="top">
                   {rateOptions.map((option) => (
                     <DropdownMenuItem
                       key={option}
@@ -206,21 +202,18 @@ export default function TtsControls({
                     }
                   }}
                 >
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={isDisabled}
-                      className="h-9 px-3 text-sm min-w-[180px] max-w-[220px] justify-between"
-                    >
-                      <span className="truncate">
-                        {selectedVoice
-                          ? `${selectedVoice.lang.trim()} - ${selectedVoice.name.trim()}`
-                          : 'Chọn giọng đọc'}
-                      </span>
-                    </Button>
+                  <DropdownMenuTrigger
+                    disabled={isDisabled}
+                    className={cn(
+                      buttonVariants({ variant: 'ghost', size: 'sm' }),
+                      'h-9 px-3 text-sm min-w-[180px] max-w-[220px] justify-between',
+                    )}
+                  >
+                    <span className="truncate">
+                      {selectedVoice ? `${selectedVoice.lang.trim()} - ${selectedVoice.name.trim()}` : 'Chọn giọng đọc'}
+                    </span>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent side="top" align="start" className="w-[280px] p-0">
+                  <DropdownMenuContent side="top" className="w-[280px] p-0">
                     {/* Search input */}
                     <div className="p-2 border-b" onClick={(e) => e.stopPropagation()}>
                       <div className="relative">
