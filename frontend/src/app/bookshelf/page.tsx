@@ -7,7 +7,7 @@ import { apiRequest, apiDelete } from '@/lib/api'
 import { logout, getCurrentUser } from '@/lib/auth'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowUpTrayIcon, BookOpenIcon, TrashIcon } from '@heroicons/react/24/outline'
+import { Upload, BookOpen, Trash2 } from 'lucide-react'
 import AuthImage from '@/components/AuthImage'
 
 interface Book {
@@ -166,7 +166,7 @@ export default function BookshelfPage() {
             </div>
           ) : books.length === 0 ? (
             <div className="text-center py-12">
-              <BookOpenIcon className="mx-auto h-12 w-12 text-gray-400" />
+              <BookOpen className="mx-auto h-12 w-12 text-gray-400 stroke-[1.5]" />
               <h3 className="mt-2 text-sm font-medium text-gray-900 dark:text-white">No books</h3>
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
                 Get started by uploading your first EPUB book.
@@ -189,10 +189,10 @@ export default function BookshelfPage() {
                           src={book.coverUrl}
                           alt={book.title}
                           className="w-full h-full object-cover"
-                          fallback={<BookOpenIcon className="h-12 w-12 text-gray-400" />}
+                          fallback={<BookOpen className="h-12 w-12 text-gray-400 stroke-[1.5]" />}
                         />
                       ) : (
-                        <BookOpenIcon className="h-12 w-12 text-gray-400" />
+                        <BookOpen className="h-12 w-12 text-gray-400 stroke-[1.5]" />
                       )}
                     </div>
                     <div className="p-3">
@@ -215,7 +215,7 @@ export default function BookshelfPage() {
                     className="absolute top-2 right-2 p-2 bg-red-600 hover:bg-red-700 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Delete book"
                   >
-                    <TrashIcon className="h-4 w-4" />
+                    <Trash2 className="h-4 w-4 stroke-[2]" />
                   </button>
                 </div>
               ))}
@@ -229,7 +229,7 @@ export default function BookshelfPage() {
                 !isOnline ? 'opacity-50 cursor-not-allowed' : ''
               }`}
             >
-              <ArrowUpTrayIcon className="h-6 w-6" />
+              <Upload className="h-6 w-6 stroke-[2]" />
               <input
                 type="file"
                 accept=".epub"

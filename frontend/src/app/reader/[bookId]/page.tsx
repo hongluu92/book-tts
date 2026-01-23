@@ -1,9 +1,19 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { ArrowLeft, Settings, ChevronLeft, ChevronRight, ChevronDown, Sun, Moon, Search } from 'lucide-react'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import TtsControls from '@/components/TtsControls'
+import { Button } from '@/components/ui/button'
+import { Select } from '@/components/ui/select'
+import { Slider } from '@/components/ui/slider'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
 import { apiRequest } from '@/lib/api'
 import { useTts } from '@/hooks/useTts'
 import { useSentenceHighlight } from '@/hooks/useSentenceHighlight'
@@ -11,6 +21,7 @@ import { useProgress } from '@/hooks/useProgress'
 import { useProgressSync } from '@/hooks/useProgressSync'
 import { Sentence } from '@/lib/tts/types'
 import { db } from '@/storage/db'
+import { cn } from '@/lib/utils'
 
 interface Chapter {
   id: string
@@ -51,10 +62,24 @@ export default function ReaderPage() {
   const [fontSize, setFontSize] = useState(18)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [showSettings, setShowSettings] = useState(false)
+  const [chapterSearchOpen, setChapterSearchOpen] = useState(false)
+  const [chapterSearchQuery, setChapterSearchQuery] = useState('')
 
   const currentChapter = book?.chapters[currentChapterIndex]
   const { progress, saveProgress } = useProgress(bookId, currentChapter?.id || '')
   const { syncProgress } = useProgressSync(bookId)
+  
+  // Filter chapters based on search query
+  const filteredChapters = useMemo(() => {
+    if (!book) return []
+    if (!chapterSearchQuery.trim()) return book.chapters
+    const query = chapterSearchQuery.toLowerCase()
+    return book.chapters.filter((chapter, index) => {
+      const chapterNum = `chương ${index + 1}`.toLowerCase()
+      const title = chapter.title?.toLowerCase().trim() || ''
+      return chapterNum.includes(query) || title.includes(query)
+    })
+  }, [book, chapterSearchQuery])
 
   const {
     isPlaying,
@@ -663,88 +688,210 @@ export default function ReaderPage() {
 
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-white dark:bg-slate-900 flex flex-col">
-        <header className="bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center justify-between">
-          <button
-            onClick={() => {
-              stop()
-              router.push('/bookshelf')
-            }}
-            className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-          >
-            ← Back
-          </button>
-          <h1 className="text-lg font-medium text-gray-900 dark:text-white line-clamp-1">
-            {book.title}
-          </h1>
-          <button
-            onClick={() => setShowSettings(!showSettings)}
-            className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-          >
-            ⚙️
-          </button>
-        </header>
+      <div className="min-h-screen bg-background flex flex-col">
+        {/* Fixed Header */}
+        <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="container flex h-14 items-center gap-4 px-4">
+            {/* Back Button */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                stop()
+                router.push('/bookshelf')
+              }}
+              className="h-9 w-9"
+            >
+              <ArrowLeft className="h-5 w-5 stroke-[2]" />
+            </Button>
 
-        {showSettings && (
-          <div className="bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-gray-700 px-4 py-4">
-            <div className="max-w-2xl mx-auto space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Font Size: {fontSize}px
-                </label>
-                <input
-                  type="range"
-                  min="16"
-                  max="24"
-                  value={fontSize}
-                  onChange={(e) => setFontSize(parseInt(e.target.value, 10))}
-                  className="w-full"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Theme
-                </label>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setTheme('light')}
-                    className={`px-4 py-2 rounded ${
-                      theme === 'light'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300'
-                    }`}
+            {/* Book Title */}
+            <h1 className="flex-1 text-lg font-semibold text-foreground line-clamp-1">
+              {book.title}
+            </h1>
+
+            {/* Chapter Navigation */}
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => {
+                  stop()
+                  const newIndex = Math.max(0, currentChapterIndex - 1)
+                  setCurrentChapterIndex(newIndex)
+                }}
+                disabled={currentChapterIndex === 0}
+                className="h-9 w-9"
+              >
+                <ChevronLeft className="h-4 w-4 stroke-[2]" />
+              </Button>
+
+              <DropdownMenu 
+                open={chapterSearchOpen} 
+                onOpenChange={(open) => {
+                  setChapterSearchOpen(open)
+                  if (!open) {
+                    setChapterSearchQuery('')
+                  }
+                }}
+              >
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="h-9 min-w-[140px] justify-between gap-2"
                   >
-                    ☀️ Light
-                  </button>
-                  <button
-                    onClick={() => setTheme('dark')}
-                    className={`px-4 py-2 rounded ${
-                      theme === 'dark'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300'
-                    }`}
-                  >
-                    🌙 Dark
-                  </button>
+                    <span className="text-sm truncate">
+                      Chương {currentChapterIndex + 1} / {book.chapters.length}
+                    </span>
+                    <ChevronDown className="h-4 w-4 stroke-[2] opacity-50 flex-shrink-0" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="bottom" align="start" className="w-[320px] p-0 max-h-[60vh]">
+                  {/* Search input */}
+                  <div className="p-2 border-b sticky top-0 bg-background z-10" onClick={(e) => e.stopPropagation()}>
+                    <div className="relative">
+                      <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <input
+                        type="text"
+                        placeholder="Tìm kiếm chương..."
+                        value={chapterSearchQuery}
+                        onChange={(e) => setChapterSearchQuery(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+                  {/* Chapter list */}
+                  <div className="overflow-y-auto max-h-[calc(60vh-60px)]">
+                    {filteredChapters.length === 0 ? (
+                      <div className="px-3 py-4 text-sm text-muted-foreground text-center">
+                        Không tìm thấy chương
+                      </div>
+                    ) : (
+                      filteredChapters.map((chapter) => {
+                        const index = book.chapters.findIndex(ch => ch.id === chapter.id)
+                        return (
+                          <DropdownMenuItem
+                            key={chapter.id}
+                            onSelect={() => {
+                              stop()
+                              setCurrentChapterIndex(index)
+                              setChapterSearchOpen(false)
+                              setChapterSearchQuery('')
+                            }}
+                            className={cn(
+                              "cursor-pointer px-3 py-2",
+                              index === currentChapterIndex && "bg-accent"
+                            )}
+                          >
+                            <div className="flex flex-col gap-0.5 w-full min-w-0">
+                              <span className="font-medium text-sm truncate">
+                                Chương {index + 1}
+                              </span>
+                              {chapter.title && (
+                                <span className="text-xs text-muted-foreground line-clamp-1 truncate">
+                                  {chapter.title.trim()}
+                                </span>
+                              )}
+                            </div>
+                          </DropdownMenuItem>
+                        )
+                      })
+                    )}
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => {
+                  stop()
+                  const newIndex = Math.min(book.chapters.length - 1, currentChapterIndex + 1)
+                  setCurrentChapterIndex(newIndex)
+                }}
+                disabled={currentChapterIndex === book.chapters.length - 1}
+                className="h-9 w-9"
+              >
+                <ChevronRight className="h-4 w-4 stroke-[2]" />
+              </Button>
+            </div>
+
+            {/* Settings Button */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowSettings(!showSettings)}
+              className="h-9 w-9"
+            >
+              <Settings className="h-5 w-5 stroke-[2]" />
+            </Button>
+          </div>
+
+          {/* Settings Panel */}
+          {showSettings && (
+            <div className="border-t bg-background px-4 py-4">
+              <div className="container max-w-2xl mx-auto space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">
+                    Cỡ chữ: {fontSize}px
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground">16</span>
+                    <Slider
+                      min={16}
+                      max={24}
+                      value={fontSize}
+                      onChange={(e) => setFontSize(parseInt(e.target.value, 10))}
+                      className="flex-1"
+                    />
+                    <span className="text-xs text-muted-foreground">24</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">
+                    Giao diện
+                  </label>
+                  <div className="flex gap-2">
+                    <Button
+                      variant={theme === 'light' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setTheme('light')}
+                      className="flex items-center gap-2"
+                    >
+                      <Sun className="h-4 w-4 stroke-[2]" />
+                      Sáng
+                    </Button>
+                    <Button
+                      variant={theme === 'dark' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setTheme('dark')}
+                      className="flex items-center gap-2"
+                    >
+                      <Moon className="h-4 w-4 stroke-[2]" />
+                      Tối
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </header>
 
-        <main ref={mainRef} className="flex-1 overflow-y-auto" style={{ paddingBottom: '280px' }}>
+        {/* Main Content */}
+        <main ref={mainRef} className="flex-1 overflow-y-auto" style={{ paddingBottom: '100px' }}>
           <div
             ref={contentRef}
-            className="max-w-3xl mx-auto px-6 py-8 font-serif leading-relaxed cursor-pointer"
+            className="max-w-3xl mx-auto px-6 py-12 font-serif leading-relaxed cursor-pointer"
             style={{ fontSize: `${fontSize}px` }}
             dangerouslySetInnerHTML={{ __html: chapterContent }}
             onClick={handleSentenceClick}
           />
         </main>
 
-        {/* Fixed Footer Container */}
-        <div className="fixed bottom-0 left-0 right-0 bg-white dark:bg-slate-800 border-t border-gray-200 dark:border-gray-700 z-50 shadow-lg">
-          {/* TTS Controls */}
+        {/* Fixed Footer - TTS Controls Only */}
+        <div className="fixed bottom-0 left-0 right-0 z-40 bg-background border-t border-border shadow-lg">
           <TtsControls
             isPlaying={isPlaying}
             isPaused={isPaused}
@@ -760,49 +907,12 @@ export default function ReaderPage() {
             onNext={next}
             onRateChange={setRate}
             onVoiceChange={setSelectedVoice}
-          isSupported={isSupported}
-          loading={loadingSentences}
-          error={sentencesError}
-          onReprocess={handleReprocessBook}
-          reprocessing={reprocessing}
-        />
-
-          {/* Chapter Navigation */}
-          <footer className="px-4 py-3 border-t border-gray-200 dark:border-gray-700">
-            <div className="flex items-center justify-center gap-4">
-              <button
-                onClick={() => {
-                  // Stop TTS
-                  stop()
-                  // Change chapter - this will trigger chapter change logic which resets TTS to start
-                  const newIndex = Math.max(0, currentChapterIndex - 1)
-                  setCurrentChapterIndex(newIndex)
-                  console.log(`[ReaderPage] Changed to previous chapter: ${newIndex}`)
-                }}
-                disabled={currentChapterIndex === 0}
-                className="px-4 py-2 bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                ← Prev Chapter
-              </button>
-              <span className="text-sm text-gray-600 dark:text-gray-400">
-                Chapter {currentChapterIndex + 1} / {book.chapters.length}
-              </span>
-              <button
-                onClick={() => {
-                  // Stop TTS
-                  stop()
-                  // Change chapter - this will trigger chapter change logic which resets TTS to start
-                  const newIndex = Math.min(book.chapters.length - 1, currentChapterIndex + 1)
-                  setCurrentChapterIndex(newIndex)
-                  console.log(`[ReaderPage] Changed to next chapter: ${newIndex}`)
-                }}
-                disabled={currentChapterIndex === book.chapters.length - 1}
-                className="px-4 py-2 bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Next Chapter →
-              </button>
-            </div>
-          </footer>
+            isSupported={isSupported}
+            loading={loadingSentences}
+            error={sentencesError}
+            onReprocess={handleReprocessBook}
+            reprocessing={reprocessing}
+          />
         </div>
       </div>
     </ProtectedRoute>

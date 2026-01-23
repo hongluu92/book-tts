@@ -1,6 +1,15 @@
 'use client'
 
-import { PlayIcon, PauseIcon, ArrowLeftIcon, ArrowRightIcon } from '@heroicons/react/24/solid'
+import { useState, useMemo } from 'react'
+import { Play, Pause, ChevronLeft, ChevronRight, Search } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
+import { cn } from '@/lib/utils'
 
 interface TtsControlsProps {
   isPlaying: boolean
@@ -20,6 +29,8 @@ interface TtsControlsProps {
   isSupported: boolean
   loading?: boolean
   error?: string | null
+  onReprocess?: () => void
+  reprocessing?: boolean
 }
 
 export default function TtsControls({
@@ -45,9 +56,9 @@ export default function TtsControls({
 }: TtsControlsProps) {
   if (!isSupported) {
     return (
-      <div className="bg-white dark:bg-slate-800 border-t border-gray-200 dark:border-gray-700 px-4 py-3">
-        <div className="text-center text-sm text-gray-500 dark:text-gray-400">
-          TTS is not supported in this browser
+      <div className="px-4 py-3 safe-area-bottom bg-background border-t border-border">
+        <div className="text-center text-sm text-muted-foreground">
+          TTS không được hỗ trợ trên trình duyệt này
         </div>
       </div>
     )
@@ -56,118 +67,207 @@ export default function TtsControls({
   const hasSentences = totalSentences > 0
   const isDisabled = loading || !!error || !hasSentences
 
+  const rateOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+  
+  // Voice search state
+  const [voiceSearchOpen, setVoiceSearchOpen] = useState(false)
+  const [voiceSearchQuery, setVoiceSearchQuery] = useState('')
+  
+  // Filter voices based on search
+  const filteredVoices = useMemo(() => {
+    if (!voiceSearchQuery.trim()) return voices
+    const query = voiceSearchQuery.toLowerCase()
+    return voices.filter(
+      (voice) =>
+        voice.name.toLowerCase().includes(query) ||
+        voice.lang.toLowerCase().includes(query)
+    )
+  }, [voices, voiceSearchQuery])
+
   return (
-    <div className="px-4 py-3 safe-area-bottom">
-      <div className="max-w-4xl mx-auto space-y-3">
+    <div className="px-4 py-3 safe-area-bottom bg-background border-t border-border">
+      <div className="max-w-6xl mx-auto">
         {/* Loading or Error Message */}
         {loading && (
-          <div className="text-center text-sm text-gray-500 dark:text-gray-400">
-            Loading sentences...
+          <div className="text-center text-sm text-muted-foreground py-2">
+            Đang tải...
           </div>
         )}
         {error && !loading && (
-          <div className="text-center space-y-2">
-            <div className="text-sm text-red-500 dark:text-red-400">
+          <div className="text-center space-y-2 py-2">
+            <div className="text-sm text-destructive">
               {error}
             </div>
             {onReprocess && error.includes('re-process') && (
-              <button
+              <Button
                 onClick={onReprocess}
                 disabled={reprocessing}
-                className="mt-2 px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                size="sm"
+                variant="outline"
               >
-                {reprocessing ? 'Re-processing...' : 'Re-process Book'}
-              </button>
+                {reprocessing ? 'Đang xử lý...' : 'Xử lý lại'}
+              </Button>
             )}
           </div>
         )}
         {!loading && !error && !hasSentences && (
-          <div className="text-center text-sm text-gray-500 dark:text-gray-400">
-            No sentences available for this chapter
+          <div className="text-center text-sm text-muted-foreground py-2">
+            Không có câu nào cho chương này
           </div>
         )}
 
-        {/* Main Controls */}
-        <div className="flex items-center justify-center gap-4">
-          <button
-            onClick={onPrev}
-            disabled={isDisabled || currentSentenceIndex === 0}
-            className="p-2 rounded-full bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
-            aria-label="Previous sentence"
-          >
-            <ArrowLeftIcon className="h-5 w-5" />
-          </button>
-
-          <button
-            onClick={isPlaying && !isPaused ? onPause : onPlay}
-            disabled={isDisabled}
-            className="p-3 rounded-full bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-            aria-label={isPlaying && !isPaused ? 'Pause' : 'Play'}
-          >
-            {isPlaying && !isPaused ? (
-              <PauseIcon className="h-6 w-6" />
-            ) : (
-              <PlayIcon className="h-6 w-6" />
-            )}
-          </button>
-
-          <button
-            onClick={onNext}
-            disabled={isDisabled || currentSentenceIndex >= totalSentences - 1}
-            className="p-2 rounded-full bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
-            aria-label="Next sentence"
-          >
-            <ArrowRightIcon className="h-5 w-5" />
-          </button>
-        </div>
-
-        {/* Rate and Voice Controls */}
-        <div className="flex items-center justify-center gap-6 flex-wrap">
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600 dark:text-gray-400">Rate:</label>
-            <input
-              type="range"
-              min="0.5"
-              max="2"
-              step="0.1"
-              value={rate}
-              onChange={(e) => onRateChange(parseFloat(e.target.value))}
-              disabled={isDisabled}
-              className="w-24 disabled:opacity-50"
-            />
-            <span className="text-sm text-gray-600 dark:text-gray-400 w-12">
-              {rate.toFixed(1)}x
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600 dark:text-gray-400">Voice:</label>
-            {voicesLoading ? (
-              <span className="text-sm text-gray-500 dark:text-gray-400">Loading...</span>
-            ) : (
-              <select
-                value={selectedVoice?.name || ''}
-                onChange={(e) => {
-                  const voice = voices.find((v) => v.name === e.target.value) || null
-                  onVoiceChange(voice)
-                }}
-                disabled={isDisabled}
-                className="px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-slate-700 text-gray-900 dark:text-white disabled:opacity-50"
+        {/* Main Controls - YouTube style, all on one row */}
+        {!loading && !error && hasSentences && (
+          <div className="flex items-center justify-between gap-4">
+            {/* Left: Play controls */}
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={onPrev}
+                disabled={isDisabled || currentSentenceIndex === 0}
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                aria-label="Câu trước"
               >
-                {voices.map((voice) => (
-                  <option key={voice.name} value={voice.name}>
-                    {voice.lang} - {voice.name}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-        </div>
+                <ChevronLeft className="h-5 w-5 stroke-[2]" />
+              </Button>
 
-        {/* Progress Indicator */}
-        {hasSentences && (
-          <div className="text-center text-xs text-gray-500 dark:text-gray-400">
-            Sentence {currentSentenceIndex + 1} / {totalSentences}
+              <Button
+                onClick={isPlaying && !isPaused ? onPause : onPlay}
+                disabled={isDisabled}
+                size="icon"
+                className="h-10 w-10 rounded-full"
+                aria-label={isPlaying && !isPaused ? 'Tạm dừng' : 'Phát'}
+              >
+                {isPlaying && !isPaused ? (
+                  <Pause className="h-5 w-5 stroke-[2.5]" fill="currentColor" />
+                ) : (
+                  <Play className="h-5 w-5 stroke-[2.5] ml-0.5" fill="currentColor" />
+                )}
+              </Button>
+
+              <Button
+                onClick={onNext}
+                disabled={isDisabled || currentSentenceIndex >= totalSentences - 1}
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                aria-label="Câu tiếp"
+              >
+                <ChevronRight className="h-5 w-5 stroke-[2]" />
+              </Button>
+
+              {/* Progress indicator */}
+              <span className="text-xs text-muted-foreground ml-2 whitespace-nowrap">
+                {currentSentenceIndex + 1} / {totalSentences}
+              </span>
+            </div>
+
+            {/* Right: Settings (Rate and Voice) */}
+            <div className="flex items-center gap-2">
+              {/* Rate Dropdown - Opens upward */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={isDisabled}
+                    className="h-9 px-3 text-sm"
+                  >
+                    {rate.toFixed(2)}x
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="end">
+                  {rateOptions.map((option) => (
+                    <DropdownMenuItem
+                      key={option}
+                      onSelect={() => onRateChange(option)}
+                      className={cn(
+                        "cursor-pointer",
+                        rate === option && "bg-accent"
+                      )}
+                    >
+                      {option.toFixed(2)}x
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              {/* Voice Select with Search */}
+              {voicesLoading ? (
+                <span className="text-xs text-muted-foreground px-2">Đang tải...</span>
+              ) : (
+                <DropdownMenu 
+                  open={voiceSearchOpen} 
+                  onOpenChange={(open) => {
+                    setVoiceSearchOpen(open)
+                    if (!open) {
+                      setVoiceSearchQuery('')
+                    }
+                  }}
+                >
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={isDisabled}
+                      className="h-9 px-3 text-sm min-w-[180px] max-w-[220px] justify-between"
+                    >
+                      <span className="truncate">
+                        {selectedVoice
+                          ? `${selectedVoice.lang.trim()} - ${selectedVoice.name.trim()}`
+                          : 'Chọn giọng đọc'}
+                      </span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="top" align="start" className="w-[280px] p-0">
+                    {/* Search input */}
+                    <div className="p-2 border-b" onClick={(e) => e.stopPropagation()}>
+                      <div className="relative">
+                        <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <input
+                          type="text"
+                          placeholder="Tìm kiếm giọng đọc..."
+                          value={voiceSearchQuery}
+                          onChange={(e) => setVoiceSearchQuery(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                          autoFocus
+                        />
+                      </div>
+                    </div>
+                    {/* Voice list */}
+                    <div className="max-h-[300px] overflow-y-auto">
+                      {filteredVoices.length === 0 ? (
+                        <div className="px-2 py-4 text-sm text-muted-foreground text-center">
+                          Không tìm thấy giọng đọc
+                        </div>
+                      ) : (
+                        filteredVoices.map((voice) => (
+                          <DropdownMenuItem
+                            key={voice.name}
+                            onSelect={() => {
+                              onVoiceChange(voice)
+                              setVoiceSearchOpen(false)
+                              setVoiceSearchQuery('')
+                            }}
+                            className={cn(
+                              "cursor-pointer",
+                              selectedVoice?.name === voice.name && "bg-accent"
+                            )}
+                          >
+                            <div className="flex flex-col">
+                              <span className="font-medium whitespace-normal break-words">{voice.name.trim()}</span>
+                              <span className="text-xs text-muted-foreground whitespace-normal break-words">{voice.lang.trim()}</span>
+                            </div>
+                          </DropdownMenuItem>
+                        ))
+                      )}
+                    </div>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
           </div>
         )}
       </div>
