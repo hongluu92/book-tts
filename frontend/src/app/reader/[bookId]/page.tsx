@@ -22,8 +22,27 @@ export default function ReaderPageV2() {
   const [chapters, setChapters] = useState<V2Chapter[]>([])
   const [currentChapterIndex, setCurrentChapterIndex] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [fontSize, setFontSize] = useState(18)
-  const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const [fontSize, setFontSize] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('reader-font-size')
+      return saved ? parseInt(saved, 10) : 18
+    }
+    return 18
+  })
+  const [fontFamily, setFontFamily] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('reader-font-family')
+      return saved || 'Georgia, serif'
+    }
+    return 'Georgia, serif'
+  })
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('reader-theme') as 'light' | 'dark' | null
+      return saved || 'light'
+    }
+    return 'light'
+  })
   const [showSettings, setShowSettings] = useState(false)
   const [reprocessing] = useState(false)
 
@@ -252,30 +271,35 @@ export default function ReaderPageV2() {
     }
   }, [chapterContent, currentMarkerId])
 
-  useEffect(() => {
-    const savedTheme = localStorage.getItem('reader-theme') as 'light' | 'dark' | null
-    if (savedTheme) {
-      setTheme(savedTheme)
-      document.documentElement.classList.toggle('dark', savedTheme === 'dark')
-    }
-
-    const savedFontSize = localStorage.getItem('reader-font-size')
-    if (savedFontSize) {
-      setFontSize(parseInt(savedFontSize, 10))
-    }
-  }, [])
-
+  // Apply theme changes
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
     localStorage.setItem('reader-theme', theme)
   }, [theme])
 
+  // Apply font size changes
   useEffect(() => {
     localStorage.setItem('reader-font-size', fontSize.toString())
     if (contentRef.current) {
       contentRef.current.style.fontSize = `${fontSize}px`
     }
   }, [fontSize])
+
+  // Apply font family changes
+  useEffect(() => {
+    localStorage.setItem('reader-font-family', fontFamily)
+    if (contentRef.current) {
+      contentRef.current.style.fontFamily = fontFamily
+    }
+  }, [fontFamily])
+
+  // Apply font settings when contentRef becomes available or content changes
+  useEffect(() => {
+    if (contentRef.current) {
+      contentRef.current.style.fontFamily = fontFamily
+      contentRef.current.style.fontSize = `${fontSize}px`
+    }
+  }, [chapterContent, fontFamily, fontSize])
 
   const handleLoadChapter = useCallback(
     (index: number) => {
@@ -532,6 +556,8 @@ export default function ReaderPageV2() {
           <ReaderSettings
             fontSize={fontSize}
             onFontSizeChange={setFontSize}
+            fontFamily={fontFamily}
+            onFontFamilyChange={setFontFamily}
             theme={theme}
             onThemeChange={setTheme}
           />
@@ -541,8 +567,8 @@ export default function ReaderPageV2() {
       <main ref={mainRef} className="flex-1 overflow-y-auto" style={{ paddingBottom: '100px' }}>
         <div
           ref={contentRef}
-          className="max-w-3xl mx-auto px-6 py-12 font-serif leading-relaxed cursor-pointer"
-          style={{ fontSize: `${fontSize}px` }}
+          className="max-w-3xl mx-auto px-6 py-12 leading-relaxed cursor-pointer"
+          style={{ fontSize: `${fontSize}px`, fontFamily: fontFamily }}
           dangerouslySetInnerHTML={{ __html: chapterContent }}
           onClick={handleSentenceClick}
           onDoubleClick={handleSentenceDoubleClick}

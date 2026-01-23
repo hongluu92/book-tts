@@ -1,19 +1,32 @@
 'use client'
 
-import { Moon, Sun } from 'lucide-react'
+import { Moon, Sun, Info } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
+import { Select } from '@/components/ui/select'
 
 interface ReaderSettingsProps {
   fontSize: number
   onFontSizeChange: (size: number) => void
+  fontFamily: string
+  onFontFamilyChange: (family: string) => void
   theme: 'light' | 'dark'
   onThemeChange: (theme: 'light' | 'dark') => void
 }
 
+const FONT_OPTIONS = [
+  { value: 'Georgia, serif', label: 'Georgia (Serif - Dễ đọc)' },
+  { value: 'Times New Roman, serif', label: 'Times New Roman (Serif - Cổ điển)' },
+  { value: 'Inter, sans-serif', label: 'Inter (Sans-serif - Hiện đại)' },
+  { value: 'Arial, sans-serif', label: 'Arial (Sans-serif - Phổ biến)' },
+  { value: 'system-ui, -apple-system, sans-serif', label: 'System Font (Mặc định hệ thống)' },
+]
+
 export default function ReaderSettings({
   fontSize,
   onFontSizeChange,
+  fontFamily,
+  onFontFamilyChange,
   theme,
   onThemeChange,
 }: ReaderSettingsProps) {
@@ -33,6 +46,20 @@ export default function ReaderSettings({
             />
             <span className="text-xs text-muted-foreground">24</span>
           </div>
+        </div>
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-foreground">Font chữ</label>
+          <Select
+            value={fontFamily}
+            onChange={(e) => onFontFamilyChange(e.target.value)}
+            className="w-full"
+          >
+            {FONT_OPTIONS.map((font) => (
+              <option key={font.value} value={font.value}>
+                {font.label}
+              </option>
+            ))}
+          </Select>
         </div>
         <div className="space-y-2">
           <label className="text-sm font-medium text-foreground">Giao diện</label>
@@ -55,6 +82,15 @@ export default function ReaderSettings({
               <Moon className="h-4 w-4 stroke-[2]" />
               Tối
             </Button>
+          </div>
+        </div>
+        <div className="pt-2 border-t space-y-1">
+          <div className="flex items-start gap-2 text-xs text-muted-foreground">
+            <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+            <div className="space-y-1">
+              <div>• <strong>Click</strong> vào câu để chuyển đến vị trí đó</div>
+              <div>• <strong>Double click</strong> vào câu để bắt đầu đọc từ đó</div>
+            </div>
           </div>
         </div>
       </div>
