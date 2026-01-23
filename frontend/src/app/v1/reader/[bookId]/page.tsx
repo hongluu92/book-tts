@@ -367,13 +367,8 @@ export default function ReaderPageV1() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isPlaying, isPaused, play, pause, prev, next])
 
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden && isPlaying) stop()
-    }
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-  }, [isPlaying, stop])
+  // NOTE: Do NOT auto-stop TTS when the tab is hidden.
+  // Users may want audio to continue while switching tabs.
 
   useEffect(() => {
     const handleBeforeUnload = () => stop()
