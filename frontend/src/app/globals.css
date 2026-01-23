@@ -66,8 +66,12 @@
 
 @layer utilities {
   .tts-active {
-    @apply bg-highlight-bg border-l-4 border-highlight-border pl-1 pr-1 rounded-sm;
-    transition: background-color 200ms ease;
+    background-color: var(--highlight-bg);
+    border-left: 4px solid var(--highlight-border);
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
+    border-radius: 0.125rem;
+    transition: background-color 200ms ease, border-color 200ms ease;
   }
 }
 

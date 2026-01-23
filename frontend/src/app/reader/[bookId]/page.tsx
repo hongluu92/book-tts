@@ -154,7 +154,37 @@ export default function ReaderPageV2() {
   }, [stop])
 
   const currentMarkerId = sentences[currentSentenceIndex]?.markerId || null
-  useSentenceHighlight(contentRef, currentMarkerId, isPlaying && !isPaused, mainRef)
+  // Always highlight the current sentence, not just when playing
+  // This ensures the highlight is visible when TTS starts or when user seeks
+  useSentenceHighlight(contentRef, currentMarkerId, true, mainRef)
+
+  // Force re-highlight when chapterContent changes (new chapter loaded)
+  // This ensures highlight is applied after HTML is rendered
+  useEffect(() => {
+    if (currentMarkerId && contentRef.current && chapterContent) {
+      // Small delay to ensure React has finished rendering the HTML
+      const timer = setTimeout(() => {
+        const element = contentRef.current?.querySelector(`#${currentMarkerId}`) as HTMLElement
+        if (!element) {
+          // Try data-sent as fallback
+          const sentenceIndex = currentMarkerId.match(/s-(\d+)/)?.[1]
+          if (sentenceIndex) {
+            const fallbackElement = contentRef.current?.querySelector(`span[data-sent="${sentenceIndex}"]`) as HTMLElement
+            if (fallbackElement) {
+              // Remove all previous highlights
+              contentRef.current?.querySelectorAll('.tts-active').forEach((el) => el.classList.remove('tts-active'))
+              fallbackElement.classList.add('tts-active')
+            }
+          }
+        } else {
+          // Remove all previous highlights
+          contentRef.current?.querySelectorAll('.tts-active').forEach((el) => el.classList.remove('tts-active'))
+          element.classList.add('tts-active')
+        }
+      }, 200)
+      return () => clearTimeout(timer)
+    }
+  }, [chapterContent, currentMarkerId])
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('reader-theme') as 'light' | 'dark' | null
