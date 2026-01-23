@@ -1,7 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import { RefreshCw, Loader2 } from 'lucide-react'
 import { requestGoogleDriveAccessToken, clearGoogleDriveToken, isGoogleDriveSignedIn } from '@/lib/googleDriveAuth'
+import { Button } from '@/components/ui/button'
 
 export default function DriveSyncButton() {
   const [busy, setBusy] = useState(false)
@@ -30,23 +32,30 @@ export default function DriveSyncButton() {
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
         {signedIn ? (
-          <>
-            <span className="text-sm text-green-600 dark:text-green-400">Drive sync: Connected</span>
-            <button
-              onClick={handleDisconnect}
-              className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
-            >
-              Disconnect
-            </button>
-          </>
+          <Button
+            onClick={handleDisconnect}
+            variant="outline"
+            size="icon"
+            className="h-9 w-9"
+            title="Disconnect Google Drive"
+          >
+            <RefreshCw className="h-4 w-4 stroke-[2] text-green-600 dark:text-green-400" />
+          </Button>
         ) : (
-          <button
+          <Button
             onClick={handleConnect}
             disabled={busy}
-            className="text-sm px-3 py-1.5 rounded-md bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            variant="outline"
+            size="icon"
+            className="h-9 w-9"
+            title="Connect Google Drive (sync progress)"
           >
-            {busy ? 'Connecting…' : 'Connect Google Drive (sync progress)'}
-          </button>
+            {busy ? (
+              <Loader2 className="h-4 w-4 stroke-[2] animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4 stroke-[2]" />
+            )}
+          </Button>
         )}
       </div>
       {error && <div className="text-xs text-red-600 dark:text-red-400">{error}</div>}

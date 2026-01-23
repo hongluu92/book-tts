@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { BookOpen, Upload, Trash2 } from 'lucide-react'
 import OfflineIndicator from '@/components/OfflineIndicator'
 import DriveSyncButton from '@/components/DriveSyncButton'
@@ -14,7 +13,6 @@ interface BookWithCover extends BookLocal {
 }
 
 export default function BookshelfPageV2() {
-  const router = useRouter()
   const [books, setBooks] = useState<BookWithCover[]>([])
   const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
@@ -98,13 +96,9 @@ export default function BookshelfPageV2() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
           <div className="flex flex-col">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">My Books</h1>
-            <span className="text-xs text-gray-500 dark:text-gray-400">v2 • local-only library • optional Drive progress sync</span>
           </div>
           <div className="flex items-center gap-4">
             <DriveSyncButton />
-            <Link href="/v1" className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">
-              Open v1
-            </Link>
           </div>
         </div>
       </header>
