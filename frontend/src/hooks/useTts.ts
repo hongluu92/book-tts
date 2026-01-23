@@ -35,7 +35,6 @@ export function useTts(options: UseTtsOptions) {
 
     try {
       const loadedVoices = await engineRef.current.getVoices()
-      console.log('[useTts] Loaded voices:', loadedVoices.length, loadedVoices.map(v => `${v.name} (${v.lang})`))
       
       setVoices(loadedVoices)
       setVoicesLoading(false)
@@ -57,13 +56,11 @@ export function useTts(options: UseTtsOptions) {
         })
         
         if (vietnameseVoice) {
-          console.log('[useTts] Auto-selected Vietnamese voice:', vietnameseVoice.name, vietnameseVoice.lang)
           setSelectedVoice(vietnameseVoice)
         } else {
           // Fallback: try to find a voice with Vietnamese-like characteristics
           // or just use the first available voice
           const defaultVoice = loadedVoices.find((v) => v.default) || loadedVoices[0]
-          console.log('[useTts] No Vietnamese voice found, using default:', defaultVoice.name, defaultVoice.lang)
           setSelectedVoice(defaultVoice)
         }
       }
@@ -83,7 +80,6 @@ export function useTts(options: UseTtsOptions) {
       // Listen for voices changed event (some browsers load voices asynchronously)
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         const handleVoicesChanged = () => {
-          console.log('[useTts] Voices changed event fired')
           loadAndSelectVoice()
         }
         
@@ -184,7 +180,6 @@ export function useTts(options: UseTtsOptions) {
 
     // Reload voices on first play (iOS requirement - voices only load after user interaction)
     if (voices.length === 0 && !voicesLoading) {
-      console.log('[useTts] Reloading voices on first play')
       loadAndSelectVoice()
     }
 
@@ -245,11 +240,6 @@ export function useTts(options: UseTtsOptions) {
     const sentencesChanged = prevSentencesRef.current !== sentences
     
     if (sentencesChanged) {
-      console.log('[useTts] Sentences changed, resetting TTS state', {
-        prevLength: prevSentencesRef.current.length,
-        newLength: sentences.length,
-      })
-      
       // Stop any playing TTS
       stop()
       
@@ -263,7 +253,6 @@ export function useTts(options: UseTtsOptions) {
       prevSentencesRef.current = sentences
     } else if (sentences.length > 0 && currentSentenceIndex >= sentences.length) {
       // Current index is out of bounds, reset to 0
-      console.log('[useTts] Sentence index out of bounds, resetting to 0')
       setCurrentSentenceIndex(0)
     }
   }, [sentences, currentSentenceIndex, stop])
@@ -276,7 +265,6 @@ export function useTts(options: UseTtsOptions) {
     // If rate changed and TTS is currently playing (not paused), restart current sentence
     if (isPlayingRef.current && !isPaused && engineRef.current && sentences.length > 0) {
       const currentIndex = currentSentenceIndex
-      console.log('[useTts] Rate changed from', prevRateRef.current, 'to', rate, '- restarting current sentence at index', currentIndex)
       
       // Set flag to prevent onEnd callback from auto-playing next sentence
       // Flag will be cleared in onStart of the new utterance

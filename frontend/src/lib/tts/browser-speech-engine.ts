@@ -24,7 +24,6 @@ export class BrowserSpeechEngine implements TtsEngine {
     if (newVoices.length > 0) {
       this.voices = newVoices
       this.voicesLoaded = true
-      console.log(`[BrowserSpeechEngine] Loaded ${newVoices.length} voices`)
     }
   }
 

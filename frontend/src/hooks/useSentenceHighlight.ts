@@ -37,13 +37,6 @@ export function useSentenceHighlight(
     
     if (!element) {
       console.warn(`[useSentenceHighlight] Could not find element with markerId: ${markerId}`)
-      // Debug: log all available markerIds
-      const allMarkers = contentRef.current.querySelectorAll('[id^="s-"], [data-sent]')
-      console.log(`[useSentenceHighlight] Available markers:`, Array.from(allMarkers).slice(0, 10).map(el => ({
-        id: el.id,
-        dataSent: el.getAttribute('data-sent'),
-        text: el.textContent?.substring(0, 50)
-      })))
       return
     }
 

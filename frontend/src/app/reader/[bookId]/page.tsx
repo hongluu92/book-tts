@@ -1,17 +1,17 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, Moon, Search, Settings, Sun } from 'lucide-react'
-import { db, BookLocal, V2Chapter, V2Progress, V2ImportStatus, BookFile } from '@/storage/db'
+import { ArrowLeft, Settings } from 'lucide-react'
+import { db, BookLocal, V2Chapter, V2Progress, V2ImportStatus } from '@/storage/db'
 import { Sentence } from '@/lib/tts/types'
 import { useTts } from '@/hooks/useTts'
 import { useSentenceHighlight } from '@/hooks/useSentenceHighlight'
+import { useChapterLoader } from '@/hooks/useChapterLoader'
 import TtsControls from '@/components/TtsControls'
-import { Button, buttonVariants } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Slider } from '@/components/ui/slider'
-import { cn } from '@/lib/utils'
+import ReaderSettings from '@/components/ReaderSettings'
+import ChapterNavigation from '@/components/ChapterNavigation'
+import { Button } from '@/components/ui/button'
 
 export default function ReaderPageV2() {
   const params = useParams()
@@ -21,16 +21,10 @@ export default function ReaderPageV2() {
   const [book, setBook] = useState<BookLocal | null>(null)
   const [chapters, setChapters] = useState<V2Chapter[]>([])
   const [currentChapterIndex, setCurrentChapterIndex] = useState(0)
-  const [chapterContent, setChapterContent] = useState<string>('')
-  const [sentences, setSentences] = useState<Sentence[]>([])
   const [loading, setLoading] = useState(true)
-  const [loadingSentences, setLoadingSentences] = useState(false)
-  const [sentencesError, setSentencesError] = useState<string | null>(null)
   const [fontSize, setFontSize] = useState(18)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [showSettings, setShowSettings] = useState(false)
-  const [chapterSearchOpen, setChapterSearchOpen] = useState(false)
-  const [chapterSearchQuery, setChapterSearchQuery] = useState('')
   const [reprocessing] = useState(false)
 
   const currentChapter = chapters[currentChapterIndex] || null
@@ -40,7 +34,6 @@ export default function ReaderPageV2() {
 
   const [progress, setProgress] = useState<V2Progress | null>(null)
   const [importStatus, setImportStatus] = useState<V2ImportStatus | null>(null)
-  const hasRestoredPositionRef = useRef(false) // Flag để chỉ khôi phục vị trí một lần
 
   const loadInitial = useCallback(async () => {
     try {
@@ -49,12 +42,6 @@ export default function ReaderPageV2() {
         db.v2Chapters.where('bookFingerprint').equals(bookFingerprint).sortBy('spineIndex'),
         db.v2ImportStatus.get(bookFingerprint),
       ])
-      console.log('[v2 Reader][debug] loadInitial:', {
-        bookFingerprint,
-        hasBook: !!b,
-        chaptersCount: chaps.length,
-        importStatus,
-      })
       setBook(b || null)
       setChapters(chaps)
       setImportStatus(status || null)
@@ -105,16 +92,23 @@ export default function ReaderPageV2() {
     }
   }, [bookFingerprint, chapters.length])
 
-  const filteredChapters = useMemo(() => {
-    if (!chapters.length) return []
-    if (!chapterSearchQuery.trim()) return chapters
-    const query = chapterSearchQuery.toLowerCase()
-    return chapters.filter((chapter, index) => {
-      const chapterNum = `chương ${index + 1}`.toLowerCase()
-      const title = chapter.title?.toLowerCase().trim() || ''
-      return chapterNum.includes(query) || title.includes(query)
-    })
-  }, [chapters, chapterSearchQuery])
+  // Use ref to store stop function to avoid circular dependency
+  const stopRef = useRef<(() => void) | null>(null)
+
+  const {
+    loadChapter,
+    hasRestoredPositionRef,
+    loadingSentences,
+    sentences,
+    chapterContent,
+    sentencesError,
+    setSentences,
+  } = useChapterLoader({
+    chapters,
+    bookFingerprint,
+    onStop: () => stopRef.current?.(),
+    scrollContainerRef: mainRef,
+  })
 
   const {
     isPlaying,
@@ -154,6 +148,11 @@ export default function ReaderPageV2() {
     onProgress: () => {},
   })
 
+  // Update stop ref after useTts is initialized
+  useEffect(() => {
+    stopRef.current = stop
+  }, [stop])
+
   const currentMarkerId = sentences[currentSentenceIndex]?.markerId || null
   useSentenceHighlight(contentRef, currentMarkerId, isPlaying && !isPaused, mainRef)
 
@@ -182,240 +181,12 @@ export default function ReaderPageV2() {
     }
   }, [fontSize])
 
-  const loadChapter = useCallback(
-    async (index: number) => {
-      if (!chapters[index]) return
-      const chapter = chapters[index]
-      try {
-        stop()
-        setLoadingSentences(true)
-        setSentences([])
-        setSentencesError(null)
-        // Reset flag khi load chapter mới để có thể khôi phục vị trí cho chapter này
-        hasRestoredPositionRef.current = false
-
-        let html = chapter.xhtmlHtml
-        if (index === 1) {
-          console.log('[v2 Reader][debug] Loading chapter 2 metadata:', {
-            index,
-            chapterId: chapter.chapterId,
-            spineIndex: chapter.spineIndex,
-            hasXhtmlHtml: !!chapter.xhtmlHtml,
-            xhtmlLength: chapter.xhtmlHtml?.length ?? 0,
-          })
-        }
-        // Fallback: nếu DB không có content (xhtmlHtml), load trực tiếp từ EPUB gốc
-        if (!html) {
-          try {
-            const fileRecord = (await db.bookFiles.get(bookFingerprint)) as BookFile | undefined
-            if (fileRecord?.blob) {
-              const epubData = await fileRecord.blob.arrayBuffer()
-              // eslint-disable-next-line @typescript-eslint/no-var-requires
-              const ePub = (await import('epubjs')).default as any
-              const bookEpub: any = ePub(epubData)
-              await bookEpub.ready
-
-              const extractHtmlFromSection = (section: any): string => {
-                if (!section) return ''
-                if (typeof section === 'string') return section
-
-                const candidates: Array<unknown> = [
-                  (section as any).outerHTML,
-                  section.contents?.innerHTML,
-                  section.document?.body?.innerHTML,
-                  section.document?.documentElement?.outerHTML,
-                  (section as any).string,
-                  (section as any).output,
-                  typeof (section as any).text === 'string' ? (section as any).text : undefined,
-                ]
-
-                for (const c of candidates) {
-                  if (typeof c === 'string' && c.trim().length > 0) {
-                    return c
-                  }
-                }
-
-                const asString = String(section)
-                if (
-                  asString &&
-                  asString.trim().length > 0 &&
-                  asString !== '[object Object]' &&
-                  asString !== '[object HTMLHtmlElement]'
-                ) {
-                  return asString
-                }
-
-                return ''
-              }
-
-              // Try multiple methods to load chapter content
-              let section: any = null
-              
-              // 1) Try resources API first
-              const resources = bookEpub.resources
-              if (resources) {
-                let resource = resources.get(chapter.chapterId)
-                if (!resource && !chapter.chapterId.startsWith('/')) {
-                  resource = resources.get('/' + chapter.chapterId)
-                }
-                if (!resource && resources.each) {
-                  resources.each((res: any, key: string) => {
-                    if (key === chapter.chapterId || key.endsWith(chapter.chapterId) || key.includes(chapter.chapterId)) {
-                      resource = res
-                      return false
-                    }
-                  })
-                }
-                if (resource && typeof resource.text === 'function') {
-                  html = await resource.text()
-                } else if (resource && typeof resource.load === 'function') {
-                  section = await resource.load(bookEpub.load.bind(bookEpub))
-                }
-              }
-
-              // 2) Try bookEpub.load() if resources didn't work
-              if (!html && !section) {
-                section = await bookEpub.load(chapter.chapterId)
-              }
-
-              // Extract HTML from section if we got one
-              if (!html && section) {
-                html = extractHtmlFromSection(section)
-              }
-
-              if (index === 1) {
-                console.log('[v2 Reader][debug] Fallback loaded chapter 2 from EPUB:', {
-                  chapterId: chapter.chapterId,
-                  htmlLength: html?.length || 0,
-                  hasSection: !!section,
-                })
-              }
-            }
-          } catch (fallbackErr) {
-            console.error('[v2 Reader] Fallback load chapter from EPUB failed:', fallbackErr)
-          }
-        }
-
-        if (!html) {
-          throw new Error('Không đọc được nội dung chương từ EPUB')
-        }
-
-        const buildSentencesAndHtml = (
-          htmlContent: string,
-        ): {
-          sentences: Sentence[]
-          html: string
-        } => {
-          const extracted: Sentence[] = []
-          try {
-            const parser = new DOMParser()
-            const doc = parser.parseFromString(htmlContent, 'text/html')
-
-            // 1) Nếu đã có span đánh dấu câu (như v1) thì chỉ cần đọc lại
-            let sentenceSpans = doc.querySelectorAll('span[data-sent][id]')
-            if (sentenceSpans.length === 0) {
-              sentenceSpans = doc.querySelectorAll('span[id^="s-"]')
-            }
-            if (sentenceSpans.length > 0) {
-              sentenceSpans.forEach((span) => {
-                const idxAttr = span.getAttribute('data-sent')
-                const sentenceIndex = idxAttr
-                  ? parseInt(idxAttr, 10)
-                  : (() => {
-                      const id = span.getAttribute('id') || ''
-                      const match = id.match(/s-(\d+)/)
-                      return match ? parseInt(match[1], 10) : -1
-                    })()
-                const markerId = span.getAttribute('id') || ''
-                const text = span.textContent || (span as HTMLElement).innerText || ''
-                if (markerId && text.trim() && sentenceIndex >= 0) {
-                  extracted.push({ sentenceIndex, text: text.trim(), markerId })
-                }
-              })
-              extracted.sort((a, b) => a.sentenceIndex - b.sentenceIndex)
-              return { sentences: extracted, html: htmlContent }
-            }
-
-            // 2) Nếu EPUB thô không có span, tự chia câu & thêm span vào DOM
-            const root = (doc.body || doc.documentElement) as HTMLElement | null
-            if (!root) return { sentences: [], html: htmlContent }
-
-            const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-            const textNodes: Text[] = []
-            while (walker.nextNode()) {
-              const node = walker.currentNode as Text
-              if (!node.nodeValue || !node.nodeValue.trim()) continue
-              textNodes.push(node)
-            }
-
-            let sentenceIndex = 0
-            const sentenceRegex = /([^.!?…。？！]+[.!?…。？！]*)/g
-
-            textNodes.forEach((textNode) => {
-              const parent = textNode.parentNode as HTMLElement | null
-              if (!parent) return
-              const text = textNode.nodeValue || ''
-              const parts: string[] = []
-              let match: RegExpExecArray | null
-              while ((match = sentenceRegex.exec(text)) !== null) {
-                const s = match[1].trim()
-                if (s) parts.push(s)
-              }
-              if (parts.length === 0) return
-
-              const frag = doc.createDocumentFragment()
-              parts.forEach((part, idx) => {
-                const span = doc.createElement('span')
-                const markerId = `s-${sentenceIndex}`
-                span.setAttribute('id', markerId)
-                span.setAttribute('data-sent', String(sentenceIndex))
-                span.textContent = part
-                frag.appendChild(span)
-                if (idx !== parts.length - 1) {
-                  frag.appendChild(doc.createTextNode(' '))
-                }
-
-                extracted.push({
-                  sentenceIndex,
-                  text: part,
-                  markerId,
-                })
-                sentenceIndex++
-              })
-
-              parent.replaceChild(frag, textNode)
-            })
-
-            return {
-              sentences: extracted,
-              html: root.innerHTML || htmlContent,
-            }
-          } catch (err) {
-            console.error('[v2 ExtractSentences] Error extracting sentences:', err)
-            return { sentences: [], html: htmlContent }
-          }
-        }
-
-        const { sentences: builtSentences, html: processedHtml } = buildSentencesAndHtml(html)
-
-        setChapterContent(processedHtml)
-
-        setTimeout(() => {
-          if (mainRef.current) {
-            mainRef.current.scrollTo({ top: 0, behavior: 'smooth' })
-          }
-        }, 100)
-
-        setSentences(builtSentences)
-      } catch (err: any) {
-        console.error('Failed to load chapter (v2):', err)
-        setSentencesError(err.message || 'Failed to load chapter')
-        setSentences([])
-      } finally {
-        setLoadingSentences(false)
-      }
+  const handleLoadChapter = useCallback(
+    (index: number) => {
+      loadChapter(index)
+      setCurrentChapterIndex(index)
     },
-    [chapters, stop],
+    [loadChapter],
   )
 
   // Tìm và khôi phục chương đã đọc lần cuối (giống v1)
@@ -432,22 +203,22 @@ export default function ReaderPageV2() {
             const dateB = b.updatedAtMs || 0
             return dateB - dateA
           })[0]
-          
+
           setProgress(lastProgress)
           const idx = chapters.findIndex((ch) => ch.chapterId === lastProgress.chapterId)
           const chapterIndex = idx >= 0 ? idx : 0
           setCurrentChapterIndex(chapterIndex)
-          await loadChapter(chapterIndex)
+          handleLoadChapter(chapterIndex)
         } else {
-          await loadChapter(0)
+          handleLoadChapter(0)
         }
       } catch (error) {
         console.error('Failed to find last read chapter:', error)
-        await loadChapter(0)
+        handleLoadChapter(0)
       }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chapters.length])
+  }, [chapters.length, bookFingerprint])
 
   // Khôi phục voice và rate đã lưu (sau khi voices đã load)
   useEffect(() => {
@@ -468,7 +239,7 @@ export default function ReaderPageV2() {
   useEffect(() => {
     if (!progress || sentences.length === 0 || !currentChapter) return
     if (hasRestoredPositionRef.current) return // Đã khôi phục rồi, không làm lại
-    
+
     // Chỉ khôi phục nếu progress thuộc về chapter hiện tại
     if (progress.chapterId === currentChapter.chapterId && progress.sentenceIndex >= 0) {
       // Kiểm tra sentenceIndex hợp lệ
@@ -480,7 +251,7 @@ export default function ReaderPageV2() {
         hasRestoredPositionRef.current = true // Đánh dấu đã xử lý để không thử lại
         return
       }
-      
+
       // Đợi useTts hook reset xong (thường reset về 0 khi sentences thay đổi)
       // Đợi đủ lâu để đảm bảo useTts đã reset và DOM đã render
       const timer = setTimeout(() => {
@@ -491,20 +262,11 @@ export default function ReaderPageV2() {
             hasRestoredPositionRef.current = true
             return
           }
-          
-          console.log('[v2 Reader] Restoring reading position:', {
-            chapterId: progress.chapterId,
-            sentenceIndex: progress.sentenceIndex,
-            totalSentences: sentences.length,
-            currentIndex: currentSentenceIndex,
-            sentenceText: targetSentence.text.substring(0, 50),
-            isPlaying,
-          })
-          
+
           // Chỉ set vị trí mà không play (tránh tự động play khi chuyển chương)
           // Nếu người dùng đang play, họ sẽ bấm play lại và sẽ đọc từ vị trí này
           setSentenceIndex(progress.sentenceIndex)
-          
+
           // Scroll đến vị trí đó trong DOM
           setTimeout(() => {
             const markerElement = document.getElementById(targetSentence.markerId)
@@ -512,14 +274,14 @@ export default function ReaderPageV2() {
               markerElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
             }
           }, 100)
-          
+
           hasRestoredPositionRef.current = true
         }
       }, 600) // Tăng thời gian đợi để đảm bảo useTts đã reset xong
-      
+
       return () => clearTimeout(timer)
     }
-  }, [progress, sentences.length, currentChapter, seek, currentSentenceIndex])
+  }, [progress, sentences.length, currentChapter, seek, currentSentenceIndex, setSentenceIndex])
 
   const handleSentenceClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -651,101 +413,12 @@ export default function ReaderPageV2() {
 
           <h1 className="flex-1 text-lg font-semibold text-foreground line-clamp-1">{book.title}</h1>
 
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => {
-                stop()
-                const newIndex = Math.max(0, currentChapterIndex - 1)
-                setCurrentChapterIndex(newIndex)
-                loadChapter(newIndex)
-              }}
-              disabled={currentChapterIndex === 0}
-              className="h-9 w-9"
-            >
-              <ChevronLeft className="h-4 w-4 stroke-[2]" />
-            </Button>
-
-            <DropdownMenu
-              open={chapterSearchOpen}
-              onOpenChange={(open) => {
-                setChapterSearchOpen(open)
-                if (!open) setChapterSearchQuery('')
-              }}
-            >
-              <DropdownMenuTrigger
-                className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'min-w-[140px] justify-between gap-2')}
-              >
-                  <span className="text-sm truncate">
-                    Chương {currentChapterIndex + 1} / {chapters.length}
-                  </span>
-                  <ChevronDown className="h-4 w-4 stroke-[2] opacity-50 flex-shrink-0" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="bottom" className="w-[320px] p-0 max-h-[60vh]">
-                <div className="p-2 border-b sticky top-0 bg-background z-10" onClick={(e) => e.stopPropagation()}>
-                  <div className="relative">
-                    <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <input
-                      type="text"
-                      placeholder="Tìm kiếm chương..."
-                      value={chapterSearchQuery}
-                      onChange={(e) => setChapterSearchQuery(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="w-full pl-8 pr-3 py-1.5 text-sm border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-                      autoFocus
-                    />
-                  </div>
-                </div>
-                <div className="overflow-y-auto max-h-[calc(60vh-60px)]">
-                  {filteredChapters.length === 0 ? (
-                    <div className="px-3 py-4 text-sm text-muted-foreground text-center">Không tìm thấy chương</div>
-                  ) : (
-                    filteredChapters.map((chapter) => {
-                      const index = chapters.findIndex((ch) => ch.id === chapter.id)
-                      return (
-                        <DropdownMenuItem
-                          key={chapter.id}
-                          onSelect={() => {
-                            stop()
-                            setCurrentChapterIndex(index)
-                            loadChapter(index)
-                            setChapterSearchOpen(false)
-                            setChapterSearchQuery('')
-                          }}
-                          className={cn('cursor-pointer px-3 py-2', index === currentChapterIndex && 'bg-accent')}
-                        >
-                          <div className="flex flex-col gap-0.5 w-full min-w-0">
-                            <span className="font-medium text-sm truncate">Chương {index + 1}</span>
-                            {chapter.title && (
-                              <span className="text-xs text-muted-foreground line-clamp-1 truncate">
-                                {chapter.title.trim()}
-                              </span>
-                            )}
-                          </div>
-                        </DropdownMenuItem>
-                      )
-                    })
-                  )}
-                </div>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => {
-                stop()
-                const newIndex = Math.min(chapters.length - 1, currentChapterIndex + 1)
-                setCurrentChapterIndex(newIndex)
-                loadChapter(newIndex)
-              }}
-              disabled={currentChapterIndex === chapters.length - 1}
-              className="h-9 w-9"
-            >
-              <ChevronRight className="h-4 w-4 stroke-[2]" />
-            </Button>
-          </div>
+          <ChapterNavigation
+            chapters={chapters}
+            currentChapterIndex={currentChapterIndex}
+            onChapterChange={handleLoadChapter}
+            onStop={stop}
+          />
 
           <Button variant="ghost" size="icon" onClick={() => setShowSettings(!showSettings)} className="h-9 w-9">
             <Settings className="h-5 w-5 stroke-[2]" />
@@ -753,47 +426,12 @@ export default function ReaderPageV2() {
         </div>
 
         {showSettings && (
-          <div className="border-t bg-background px-4 py-4">
-            <div className="container max-w-2xl mx-auto space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Cỡ chữ: {fontSize}px</label>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-muted-foreground">16</span>
-                  <Slider
-                    min={16}
-                    max={24}
-                    value={fontSize}
-                    onChange={(e) => setFontSize(parseInt(e.target.value, 10))}
-                    className="flex-1"
-                  />
-                  <span className="text-xs text-muted-foreground">24</span>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Giao diện</label>
-                <div className="flex gap-2">
-                  <Button
-                    variant={theme === 'light' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setTheme('light')}
-                    className="flex items-center gap-2"
-                  >
-                    <Sun className="h-4 w-4 stroke-[2]" />
-                    Sáng
-                  </Button>
-                  <Button
-                    variant={theme === 'dark' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setTheme('dark')}
-                    className="flex items-center gap-2"
-                  >
-                    <Moon className="h-4 w-4 stroke-[2]" />
-                    Tối
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <ReaderSettings
+            fontSize={fontSize}
+            onFontSizeChange={setFontSize}
+            theme={theme}
+            onThemeChange={setTheme}
+          />
         )}
       </header>
 
@@ -833,4 +471,3 @@ export default function ReaderPageV2() {
     </div>
   )
 }
-

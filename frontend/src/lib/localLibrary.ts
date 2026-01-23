@@ -152,9 +152,6 @@ async function extractAndStoreCover(bookFingerprint: string, file: File) {
         mimeType: coverMimeType,
       }
       await db.bookCovers.put(cover)
-      console.log('[v2 Import] Cover extracted and stored', { bookFingerprint, mimeType: coverMimeType })
-    } else {
-      console.log('[v2 Import] No cover found for book', bookFingerprint)
     }
   } catch (err) {
     console.error('[v2 Import] Error extracting cover', err)
@@ -203,15 +200,6 @@ async function parseAndStoreChapters(bookFingerprint: string, file: File) {
             href,
             spineIndex,
             chapterId,
-          })
-        } else if (process.env.NODE_ENV !== 'production') {
-          // Debug: log độ dài HTML để chắc đã đọc được nội dung
-          console.log('[v2 Import][debug] Parsed chapter html:', {
-            bookFingerprint,
-            href,
-            spineIndex,
-            htmlLength: html?.length || 0,
-            firstChars: html.substring(0, 100),
           })
         }
       } catch (innerErr: any) {
