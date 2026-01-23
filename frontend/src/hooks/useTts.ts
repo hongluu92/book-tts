@@ -24,6 +24,8 @@ export function useTts(options: UseTtsOptions) {
 
   const engineRef = useRef<BrowserSpeechEngine | null>(null)
   const isPlayingRef = useRef(false)
+  const prevRateRef = useRef(1.0) // Initialize with default rate
+  const isRestartingRef = useRef(false) // Flag to prevent auto-play during rate change restart
 
   const loadAndSelectVoice = useCallback(async () => {
     if (!engineRef.current || !engineRef.current.isSupported()) {
@@ -135,10 +137,18 @@ export function useTts(options: UseTtsOptions) {
           setIsPlaying(true)
           setIsPaused(false)
           isPlayingRef.current = true
+          // Clear restart flag when new utterance starts
+          isRestartingRef.current = false
           onSentenceStart?.(sentence)
         },
         onEnd: () => {
           onSentenceEnd?.(sentence)
+          
+          // Don't auto-play next if we're restarting due to rate change
+          // The flag will be cleared in onStart of the new utterance
+          if (isRestartingRef.current) {
+            return
+          }
           
           // Auto-play next sentence if still playing
           if (isPlayingRef.current && index < sentences.length - 1) {
@@ -257,6 +267,39 @@ export function useTts(options: UseTtsOptions) {
       setCurrentSentenceIndex(0)
     }
   }, [sentences, currentSentenceIndex, stop])
+
+  // Restart current sentence when rate changes while playing
+  useEffect(() => {
+    // Skip on initial mount
+    if (prevRateRef.current === rate) return
+    
+    // If rate changed and TTS is currently playing (not paused), restart current sentence
+    if (isPlayingRef.current && !isPaused && engineRef.current && sentences.length > 0) {
+      const currentIndex = currentSentenceIndex
+      console.log('[useTts] Rate changed from', prevRateRef.current, 'to', rate, '- restarting current sentence at index', currentIndex)
+      
+      // Set flag to prevent onEnd callback from auto-playing next sentence
+      // Flag will be cleared in onStart of the new utterance
+      isRestartingRef.current = true
+      
+      // Cancel current utterance
+      engineRef.current.cancel()
+      
+      // Restart current sentence with new rate
+      // Use a small delay to ensure cancellation is processed
+      setTimeout(() => {
+        if (isPlayingRef.current && currentIndex >= 0 && currentIndex < sentences.length) {
+          playSentence(currentIndex)
+        } else {
+          // If not playing anymore, clear the flag
+          isRestartingRef.current = false
+        }
+      }, 50)
+    }
+    
+    // Update previous rate
+    prevRateRef.current = rate
+  }, [rate, isPaused, currentSentenceIndex, sentences.length, playSentence])
 
   // Expose setCurrentSentenceIndex for restoring position without playing
   const setSentenceIndex = useCallback((index: number) => {
