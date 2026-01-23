@@ -4,7 +4,6 @@ import './globals.css'
 import DevServiceWorkerCleaner from '@/components/DevServiceWorkerCleaner'
 import ServiceWorkerUpdate from '@/components/ServiceWorkerUpdate'
 import ServiceWorkerRegister from '@/components/ServiceWorkerRegister'
-import PWACacheDebug from '@/components/PWACacheDebug'
 
 const inter = Inter({ 
   subsets: ['latin'],
@@ -53,7 +52,6 @@ export default function RootLayout({
         <DevServiceWorkerCleaner />
         <ServiceWorkerRegister />
         <ServiceWorkerUpdate />
-        <PWACacheDebug />
         {children}
       </body>
     </html>

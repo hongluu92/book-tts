@@ -1,311 +1,296 @@
 # Code Review Report
+
 **Date:** 2025-01-22  
-**Scope:** Frontend codebase review and mobile browser error fix
+**Reviewer:** Auto (AI Code Reviewer)  
+**Scope:** Uncommitted changes in frontend
 
 ---
 
-## Executive Summary
+## 🔴 CRITICAL ISSUES
 
-✅ **CRITICAL ISSUE FIXED**: Mobile browser error "Cannot read property of undefined (reading digest)" has been resolved.
+### 1. Service Worker Not Working on Mobile (192.168.1.6)
 
-⚠️ **HIGH PRIORITY ISSUES FOUND**: 49 console.log/error statements found, should be replaced with proper logging.
+**File:** `frontend/src/components/ServiceWorkerRegister.tsx`  
+**Line:** 31  
+**Severity:** CRITICAL  
+**Issue:** Service worker registration is blocked on mobile devices accessing via `https://192.168.1.6:3001` due to overly restrictive security check.
 
----
-
-## 🔴 CRITICAL Issues (Security & Breaking Bugs)
-
-### 1. ✅ FIXED: `crypto.subtle` undefined on mobile browsers
-**File:** `frontend/src/lib/bookFingerprint.ts:11`  
-**Issue:** `crypto.subtle` is undefined on mobile browsers in non-HTTPS contexts or older browsers, causing runtime crash.
-
-**Error Message:** "Cannot read property of undefined (reading digest)"
-
-**Root Cause:**
-- `crypto.subtle` requires a secure context (HTTPS)
-- Not available in HTTP contexts
-- Some older mobile browsers don't support it
-- No error handling or fallback mechanism
-
-**Fix Applied:**
-- Added check for `crypto.subtle` availability
-- Implemented fallback hash function (`simpleHash`) using djb2 algorithm
-- Added try-catch error handling
-- Added warning logs for debugging
-
-**Status:** ✅ **FIXED**
-
----
-
-## 🟠 HIGH Priority Issues (Code Quality)
-
-### 2. Excessive console.log statements
-**Files:** Multiple files across the codebase  
-**Count:** 49 instances found
-
-**Locations:**
-- `frontend/src/app/reader/[bookId]/page.tsx` - 8 instances
-- `frontend/src/lib/localLibrary.ts` - 15 instances
-- `frontend/src/hooks/useTts.ts` - 3 instances
-- `frontend/src/hooks/useChapterLoader.ts` - 2 instances
-- `frontend/src/lib/epubHelpers.ts` - 1 instance
-- `frontend/src/storage/db.ts` - 2 instances
-- And 18 more files...
-
-**Issue:** 
-- Debug statements left in production code
-- No structured logging system
-- Potential performance impact
-- Security risk if sensitive data is logged
-
-**Recommendation:**
-1. Remove debug `console.log` statements
-2. Keep `console.error` and `console.warn` but wrap in a logging utility
-3. Implement proper logging service with log levels
-4. Consider using a logging library (e.g., `pino`, `winston`)
-
-**Example Fix:**
+**Problem:**
 ```typescript
-// Instead of:
-console.log('[Reader] Scrolled to sentence:', markerId)
-
-// Use:
-logger.debug('Scrolled to sentence', { markerId })
+const isSecure = window.location.protocol === 'https:' || 
+                 window.location.hostname === 'localhost' || 
+                 window.location.hostname === '127.0.0.1'
 ```
 
-**Severity:** HIGH  
-**Status:** ⚠️ **NEEDS ATTENTION**
+The code only allows `localhost` or `127.0.0.1`, but mobile devices access via `192.168.1.6`, which is a valid HTTPS connection. The browser's service worker API already enforces secure contexts, so this manual check is redundant and incorrectly restrictive.
 
-### 3. Large file: `frontend/src/app/reader/[bookId]/page.tsx`
-**File:** `frontend/src/app/reader/[bookId]/page.tsx`  
-**Lines:** ~604 lines
+**Impact:** Service worker fails to register on mobile devices, breaking PWA functionality.
 
-**Issue:** 
-- File exceeds recommended 800-line limit but is close
-- Complex component with multiple responsibilities
-- Difficult to maintain and test
+**Fix:**
+```typescript
+// Trust browser's secure context check - HTTPS is sufficient
+const isSecure = window.location.protocol === 'https:' || 
+                 window.location.hostname === 'localhost' || 
+                 window.location.hostname === '127.0.0.1' ||
+                 /^192\.168\.\d+\.\d+$/.test(window.location.hostname) // Allow local network IPs
+```
 
-**Recommendation:**
-- Extract custom hooks for complex logic
-- Split into smaller sub-components
-- Move utility functions to separate files
+**Better Fix (Recommended):**
+```typescript
+// Service Worker API itself enforces secure contexts
+// We only need to check HTTPS protocol, not specific hostnames
+const isSecure = window.location.protocol === 'https:' || 
+                 window.location.hostname === 'localhost' || 
+                 window.location.hostname === '127.0.0.1'
+// Remove the check entirely - let browser handle secure context validation
+// Or use: const isSecure = window.isSecureContext !== false
+```
 
-**Severity:** MEDIUM  
-**Status:** ⚠️ **MONITOR**
-
-### 4. Large function: `loadChapterHtmlFromBook`
-**File:** `frontend/src/lib/localLibrary.ts:263`  
-**Lines:** ~110 lines
-
-**Issue:**
-- Function exceeds 50-line recommendation
-- Complex nested logic with multiple fallback strategies
-- Difficult to test and maintain
-
-**Recommendation:**
-- Extract helper functions:
-  - `tryResourcesApi()`
-  - `trySpineItemLoad()`
-  - `tryBookEpubLoad()`
-- Simplify error handling
-
-**Severity:** MEDIUM  
-**Status:** ⚠️ **CONSIDER REFACTORING**
+**Recommended Solution:**
+Remove the hostname check entirely and rely on the browser's secure context API:
+```typescript
+// Check if we're in a secure context (browser handles this)
+const isSecure = window.isSecureContext !== false || 
+                 window.location.protocol === 'https:'
+```
 
 ---
 
-## 🟡 MEDIUM Priority Issues (Best Practices)
+## 🟠 HIGH PRIORITY ISSUES
 
-### 5. Missing input validation
-**Files:** Multiple API and user input handlers
+### 2. Memory Leak: setInterval Not Cleared
 
-**Issue:**
-- No validation for file uploads beyond extension check
-- No size limits on EPUB files
-- No sanitization of user inputs
+**File:** `frontend/src/components/ServiceWorkerRegister.tsx`  
+**Line:** 94-96  
+**Severity:** HIGH  
+**Issue:** `setInterval` is created but never cleared, causing memory leaks on component unmount.
 
-**Recommendation:**
-- Add file size limits (e.g., max 50MB)
-- Validate EPUB file structure before processing
-- Sanitize user inputs (titles, author names)
-
-**Example:**
+**Problem:**
 ```typescript
-export async function importLocalEpub(file: File): Promise<BookLocal> {
-  const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
-  if (file.size > MAX_FILE_SIZE) {
-    throw new Error('File size exceeds maximum limit of 50MB')
-  }
-  // ... rest of code
+setInterval(() => {
+  registration.update()
+}, 60 * 1000) // Check every minute
+```
+
+**Fix:**
+```typescript
+const updateInterval = setInterval(() => {
+  registration.update()
+}, 60 * 1000)
+
+// Cleanup on unmount
+return () => {
+  clearInterval(updateInterval)
 }
 ```
 
-**Severity:** MEDIUM  
-**Status:** ⚠️ **RECOMMENDED**
-
-### 6. Type safety: Use of `any` types
-**Files:** 
-- `frontend/src/lib/localLibrary.ts` - Multiple `any` types
-- `frontend/src/app/reader/[bookId]/page.tsx` - Some `any` types
-
-**Issue:**
-- Loss of type safety
-- Potential runtime errors
-- Difficult to refactor
-
-**Examples:**
-```typescript
-const bookEpub: any = ePub(epubData)
-const spineItem: any = item
-```
-
-**Recommendation:**
-- Create proper TypeScript interfaces for epub.js types
-- Use type assertions only when necessary
-- Consider creating type definitions for epub.js
-
-**Severity:** MEDIUM  
-**Status:** ⚠️ **RECOMMENDED**
-
-### 7. Error handling inconsistencies
-**Files:** Multiple files
-
-**Issue:**
-- Some functions throw errors, others return null/undefined
-- Inconsistent error messages
-- Some errors are silently caught and logged
-
-**Recommendation:**
-- Standardize error handling approach
-- Create custom error classes
-- Ensure all errors are properly surfaced to users
-
-**Severity:** MEDIUM  
-**Status:** ⚠️ **RECOMMENDED**
+**Note:** The component returns `null`, so we need to track the interval ID and clear it in a cleanup function.
 
 ---
 
-## 🟢 LOW Priority Issues (Code Style & Minor)
+### 3. Memory Leak: setInterval Not Cleared (ServiceWorkerUpdate)
 
-### 8. Vietnamese comments in code
-**File:** `frontend/src/lib/localLibrary.ts`
+**File:** `frontend/src/components/ServiceWorkerUpdate.tsx`  
+**Line:** 38-40  
+**Severity:** HIGH  
+**Issue:** Same problem - `setInterval` not cleared on unmount.
 
-**Examples:**
-- Line 193: `// Prefer loading via resources API (ổn định hơn cho EPUB thực tế)`
-- Line 272: `// Nếu section là một DOM element (vd: HTMLHtmlElement), ưu tiên outerHTML`
-- Line 288: `// Nhiều trường hợp section bản thân đã là HTML khi stringify`
+**Fix:**
+```typescript
+const updateInterval = setInterval(() => {
+  registration?.update()
+}, 60 * 1000)
 
-**Issue:**
-- Mixed language comments reduce code maintainability for international teams
-- Inconsistent with English codebase
+return () => {
+  clearInterval(updateInterval)
+}
+```
 
-**Recommendation:**
-- Translate comments to English
-- Or document that Vietnamese comments are acceptable for this project
+---
 
-**Severity:** LOW  
-**Status:** ℹ️ **INFORMATIONAL**
+### 4. Excessive console.log Statements
 
-### 9. Missing JSDoc for public APIs
-**Files:** Multiple exported functions
+**Files:** Multiple  
+**Severity:** HIGH  
+**Issue:** Production code contains numerous `console.log` statements that should be removed or gated.
 
-**Issue:**
-- No documentation for exported functions
-- Difficult for other developers to understand API contracts
+**Affected Files:**
+- `frontend/src/components/ServiceWorkerRegister.tsx` (lines 17, 40, 48, 56, 57, 61, 64, 66, 72, 76, 81, 85, 87)
+- `frontend/src/components/DevServiceWorkerCleaner.tsx` (multiple console.log statements)
+- `frontend/src/components/ServiceWorkerUpdate.tsx` (line 42)
 
-**Recommendation:**
-- Add JSDoc comments for all exported functions
-- Document parameters, return types, and exceptions
+**Fix:** Use a logging utility that respects `NODE_ENV`:
+```typescript
+const log = process.env.NODE_ENV === 'development' ? console.log : () => {}
+const warn = process.env.NODE_ENV === 'development' ? console.warn : () => {}
+```
 
-**Example:**
+Or use a proper logging library that can be disabled in production.
+
+---
+
+### 5. Missing Error Handling in DevServiceWorkerCleaner
+
+**File:** `frontend/src/components/DevServiceWorkerCleaner.tsx`  
+**Line:** 28-50  
+**Severity:** HIGH  
+**Issue:** While there is try-catch, the error handling could be more robust. The component reloads the page even if cleanup fails partially.
+
+**Recommendation:** Add better error recovery and user feedback.
+
+---
+
+## 🟡 MEDIUM PRIORITY ISSUES
+
+### 6. Hardcoded Timeout Values
+
+**File:** `frontend/src/components/ServiceWorkerRegister.tsx`  
+**Line:** 43  
+**Severity:** MEDIUM  
+**Issue:** Magic number `1000` (1 second delay) should be a named constant.
+
+**Fix:**
+```typescript
+const SW_REGISTRATION_DELAY_MS = 1000
+await new Promise((resolve) => setTimeout(resolve, SW_REGISTRATION_DELAY_MS))
+```
+
+---
+
+### 7. Type Safety: ServiceWorker Type Assertion
+
+**File:** `frontend/src/components/ServiceWorkerRegister.tsx`  
+**Line:** 63  
+**Severity:** MEDIUM  
+**Issue:** Type assertion `as ServiceWorker` may not be safe.
+
+**Fix:**
+```typescript
+registration.installing.addEventListener('statechange', (e) => {
+  const sw = e.target
+  if (sw instanceof ServiceWorker) {
+    console.log('[PWA] Service worker state changed:', sw.state)
+    // ...
+  }
+})
+```
+
+---
+
+### 8. Missing JSDoc for Public Components
+
+**Files:** All component files  
+**Severity:** MEDIUM  
+**Issue:** Components have basic comments but lack comprehensive JSDoc with parameter descriptions, return types, and usage examples.
+
+**Example Fix:**
 ```typescript
 /**
- * Computes a SHA-256 fingerprint for an EPUB file.
- * Uses file size and first/last 64KB chunks for efficient hashing.
+ * Registers the service worker for PWA functionality.
  * 
- * @param file - The EPUB file to fingerprint
- * @returns Promise resolving to hex-encoded SHA-256 hash
- * @throws Error if file cannot be read
+ * Only registers in production mode or when ENABLE_PWA environment variable is set.
+ * Requires HTTPS or localhost for security.
+ * 
+ * @component
+ * @example
+ * ```tsx
+ * <ServiceWorkerRegister />
+ * ```
  */
-export async function computeBookFingerprint(file: File): Promise<string>
 ```
 
+---
+
+### 9. Potential Race Condition in ServiceWorkerRegister
+
+**File:** `frontend/src/components/ServiceWorkerRegister.tsx`  
+**Line:** 46-50  
+**Severity:** MEDIUM  
+**Issue:** Checking for existing registrations before registering could have a race condition if multiple instances of the component mount simultaneously.
+
+**Recommendation:** Add a singleton pattern or use a global flag to prevent duplicate registrations.
+
+---
+
+## 🟢 LOW PRIORITY / BEST PRACTICES
+
+### 10. Inconsistent Comment Language
+
+**Files:** Multiple  
 **Severity:** LOW  
-**Status:** ℹ️ **RECOMMENDED**
+**Issue:** Mix of Vietnamese and English comments. Consider standardizing on English for better maintainability.
 
 ---
 
-## ✅ Security Review
+### 11. Magic Numbers
 
-### Security Findings:
-
-1. **✅ No hardcoded credentials found**
-2. **✅ No API keys in code** (using environment variables/localStorage appropriately)
-3. **✅ No SQL injection risks** (using IndexedDB/Dexie, not SQL)
-4. **⚠️ XSS potential**: HTML content from EPUB files is rendered directly
-   - **Recommendation:** Sanitize HTML content before rendering
-   - **Location:** `frontend/src/lib/localLibrary.ts` - EPUB HTML extraction
-5. **✅ Input validation**: Basic validation present but could be improved (see Issue #5)
-6. **✅ Dependencies**: No obvious insecure dependencies detected
+**File:** `frontend/src/components/ServiceWorkerUpdate.tsx`  
+**Line:** 16  
+**Severity:** LOW  
+**Issue:** Hardcoded check for `development` mode should use environment variable check.
 
 ---
 
-## 📊 Code Quality Metrics
+### 12. Missing Accessibility Attributes
 
-| Metric | Status | Notes |
-|--------|--------|-------|
-| Files > 800 lines | ✅ Pass | Largest file: ~604 lines |
-| Functions > 50 lines | ⚠️ 1 found | `loadChapterHtmlFromBook` (~110 lines) |
-| Nesting depth > 4 | ✅ Pass | Max depth: 3-4 levels |
-| Console statements | ⚠️ 49 found | Should be replaced with logging |
-| TODO/FIXME comments | ✅ None found | Good! |
-| Type safety | ⚠️ Some `any` types | Could be improved |
+**File:** `frontend/src/components/ServiceWorkerUpdate.tsx`  
+**Line:** 73-79  
+**Severity:** LOW  
+**Issue:** Button lacks proper ARIA labels for screen readers.
 
----
-
-## 🎯 Recommendations Summary
-
-### Immediate Actions (Before Next Commit):
-1. ✅ **DONE**: Fix `crypto.subtle` undefined error
-2. ⚠️ **TODO**: Remove or replace debug `console.log` statements
-3. ⚠️ **TODO**: Add file size validation for EPUB imports
-
-### Short-term (Next Sprint):
-1. Implement structured logging system
-2. Add input validation and sanitization
-3. Improve TypeScript types (reduce `any` usage)
-4. Extract large functions into smaller, testable units
-
-### Long-term (Technical Debt):
-1. Refactor large components
-2. Add comprehensive JSDoc documentation
-3. Standardize error handling patterns
-4. Consider HTML sanitization library for EPUB content
+**Fix:**
+```typescript
+<button
+  onClick={handleReload}
+  disabled={isReloading}
+  aria-label="Reload page to apply update"
+  className="..."
+>
+```
 
 ---
 
-## ✅ Approval Status
+## 📊 SUMMARY
 
-**Status:** ⚠️ **CONDITIONAL APPROVAL**
-
-**Blocking Issues:** None (critical issue fixed)
-
-**Recommended Actions Before Merge:**
-1. Remove debug `console.log` statements (or wrap in logging utility)
-2. Add file size validation
-3. Review and address HIGH priority issues
-
-**Can proceed with merge after addressing HIGH priority items.**
+| Severity | Count | Status |
+|----------|-------|--------|
+| 🔴 CRITICAL | 1 | **BLOCKING** |
+| 🟠 HIGH | 4 | Needs attention |
+| 🟡 MEDIUM | 4 | Should fix |
+| 🟢 LOW | 3 | Nice to have |
 
 ---
 
-## 📝 Notes
+## ✅ RECOMMENDATIONS
 
-- The critical mobile browser error has been fixed with a fallback mechanism
-- Code quality is generally good, but logging and error handling could be improved
-- No security vulnerabilities detected beyond XSS concerns with EPUB HTML rendering
-- Consider adding automated linting rules to catch console.log statements in CI/CD
+1. **IMMEDIATE ACTION REQUIRED:** Fix the service worker registration check to allow local network IPs (192.168.x.x) over HTTPS.
+2. Fix memory leaks by clearing intervals on component unmount.
+3. Remove or gate console.log statements for production.
+4. Add proper error boundaries and error handling.
+5. Improve type safety and add JSDoc documentation.
 
 ---
 
-**Reviewer:** Auto (AI Code Reviewer)  
-**Review Date:** 2025-01-22
+## ✅ CRITICAL ISSUE FIXED
+
+**Status:** The critical bug preventing service worker registration on mobile has been **FIXED**.
+
+**Changes Made:**
+1. ✅ Fixed `ServiceWorkerRegister.tsx` - Added support for local network IPs (192.168.x.x) over HTTPS
+2. ✅ Fixed `PWASyncButton.tsx` - Updated security check to allow local network IPs
+3. ✅ Fixed `PWACacheDebug.tsx` - Updated security check to allow local network IPs
+4. ✅ Fixed memory leaks - Added cleanup for `setInterval` in both `ServiceWorkerRegister` and `ServiceWorkerUpdate`
+
+**Remaining Issues:**
+- Console.log statements should be gated for production (HIGH priority)
+- Missing JSDoc documentation (MEDIUM priority)
+- Other best practices improvements (LOW priority)
+
+---
+
+## 📝 NOTES
+
+- The server.js correctly sets up HTTPS for mobile testing
+- The service worker file (sw.js) appears to be correctly generated
+- The issue is purely in the client-side registration logic
+- All other PWA infrastructure appears correct
