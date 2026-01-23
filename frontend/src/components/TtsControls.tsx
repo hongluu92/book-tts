@@ -177,7 +177,11 @@ export default function TtsControls({
                   {rateOptions.map((option) => (
                     <DropdownMenuItem
                       key={option}
-                      onSelect={() => onRateChange(option)}
+                      onSelect={() => {
+                        if (option !== rate) {
+                          onRateChange(option)
+                        }
+                      }}
                       className={cn(
                         "cursor-pointer",
                         rate === option && "bg-accent"

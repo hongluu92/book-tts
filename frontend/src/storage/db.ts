@@ -56,6 +56,12 @@ export interface V2ImportStatus {
   lastError?: string | null
 }
 
+export interface BookCover {
+  bookFingerprint: string
+  blob: Blob
+  mimeType: string
+}
+
 class EpubReaderDB extends Dexie {
   progress!: Table<Progress>
   books!: Table<BookLocal>
@@ -63,6 +69,7 @@ class EpubReaderDB extends Dexie {
   v2Progress!: Table<V2Progress>
   v2Chapters!: Table<V2Chapter>
   v2ImportStatus!: Table<V2ImportStatus>
+  bookCovers!: Table<BookCover>
 
   constructor() {
     super('EpubReaderDB')
@@ -95,6 +102,17 @@ class EpubReaderDB extends Dexie {
       v2Progress: '++id, bookFingerprint, [bookFingerprint+chapterId], updatedAtMs',
       v2Chapters: '++id, bookFingerprint, [bookFingerprint+spineIndex], chapterId',
       v2ImportStatus: 'bookFingerprint, updatedAtMs',
+    })
+
+    // v5: add bookCovers store for cover images
+    this.version(5).stores({
+      progress: '++id, bookId, chapterId, [bookId+chapterId], updatedAt',
+      books: 'bookFingerprint, addedAtMs, title',
+      bookFiles: 'bookFingerprint',
+      v2Progress: '++id, bookFingerprint, [bookFingerprint+chapterId], updatedAtMs',
+      v2Chapters: '++id, bookFingerprint, [bookFingerprint+spineIndex], chapterId',
+      v2ImportStatus: 'bookFingerprint, updatedAtMs',
+      bookCovers: 'bookFingerprint',
     })
   }
 }

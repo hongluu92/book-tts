@@ -1,4 +1,4 @@
-import { db, BookLocal, V2Chapter, V2ImportStatus } from '@/storage/db'
+import { db, BookLocal, V2Chapter, V2ImportStatus, BookCover } from '@/storage/db'
 import { computeBookFingerprint } from '@/lib/bookFingerprint'
 import ePub from 'epubjs'
 
@@ -28,12 +28,138 @@ export async function importLocalEpub(file: File): Promise<BookLocal> {
     await db.books.put(book)
   })
 
-  // Parse EPUB and populate v2Chapters for local reader (best-effort, outside main transaction)
+  // Extract cover and parse EPUB (best-effort, outside main transaction)
+  extractAndStoreCover(bookFingerprint, file).catch((err) => {
+    console.error('Failed to extract cover for local import (v2)', err)
+  })
+
   parseAndStoreChapters(bookFingerprint, file).catch((err) => {
     console.error('Failed to parse EPUB for local import (v2)', err)
   })
 
   return book
+}
+
+async function extractAndStoreCover(bookFingerprint: string, file: File) {
+  try {
+    const epubData = await file.arrayBuffer()
+    const bookEpub: any = ePub(epubData)
+    await bookEpub.ready
+
+    // Try to get cover from epub.js
+    let coverBlob: Blob | null = null
+    let coverMimeType = 'image/jpeg'
+
+    try {
+      // Method 1: Try epub.coverUrl() which epub.js provides
+      if (typeof bookEpub.coverUrl === 'function') {
+        const coverUrl = await bookEpub.coverUrl()
+        if (coverUrl) {
+          try {
+            // coverUrl might be a blob URL, data URL, or regular URL
+            const response = await fetch(coverUrl)
+            coverBlob = await response.blob()
+            coverMimeType = coverBlob.type || 'image/jpeg'
+          } catch (fetchErr) {
+            console.warn('[v2 Import] Failed to fetch cover from coverUrl', fetchErr)
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[v2 Import] epub.coverUrl() failed, trying alternative methods', err)
+    }
+
+    // Method 2: Try to find cover in manifest/resources
+    if (!coverBlob) {
+      try {
+        const resources = (bookEpub as any).resources
+        if (resources) {
+          // Look for cover in metadata
+          const metadata = (bookEpub as any).packaging?.metadata || {}
+          let coverId: string | undefined
+
+          if (metadata.meta) {
+            const metaArray = Array.isArray(metadata.meta) ? metadata.meta : [metadata.meta]
+            const coverMeta = metaArray.find(
+              (m: any) => m['@_name'] === 'cover' || m['@_property'] === 'cover-image',
+            )
+            coverId = coverMeta?.['@_content']
+          }
+
+          if (coverId) {
+            const coverResource = resources.get(coverId)
+            if (coverResource) {
+              try {
+                if (typeof coverResource.url === 'function') {
+                  const url = await coverResource.url()
+                  const response = await fetch(url)
+                  coverBlob = await response.blob()
+                  coverMimeType = coverBlob.type || 'image/jpeg'
+                } else if (typeof coverResource.load === 'function') {
+                  // Try loading the resource
+                  const loaded = await coverResource.load(bookEpub.load.bind(bookEpub))
+                  if (loaded && typeof loaded === 'string') {
+                    // If it's a data URL
+                    const response = await fetch(loaded)
+                    coverBlob = await response.blob()
+                    coverMimeType = coverBlob.type || 'image/jpeg'
+                  }
+                }
+              } catch (loadErr) {
+                console.warn('[v2 Import] Failed to load cover resource', loadErr)
+              }
+            }
+          }
+
+          // Method 3: Try common cover filenames
+          if (!coverBlob) {
+            const commonCoverNames = ['cover.jpg', 'cover.jpeg', 'cover.png', 'cover.gif']
+            for (const name of commonCoverNames) {
+              try {
+                const resource = resources.get(name) || resources.get('/' + name)
+                if (resource) {
+                  if (typeof resource.url === 'function') {
+                    const url = await resource.url()
+                    const response = await fetch(url)
+                    coverBlob = await response.blob()
+                    coverMimeType = coverBlob.type || 'image/jpeg'
+                    break
+                  } else if (typeof resource.load === 'function') {
+                    const loaded = await resource.load(bookEpub.load.bind(bookEpub))
+                    if (loaded && typeof loaded === 'string') {
+                      const response = await fetch(loaded)
+                      coverBlob = await response.blob()
+                      coverMimeType = coverBlob.type || 'image/jpeg'
+                      break
+                    }
+                  }
+                }
+              } catch (e) {
+                // Continue to next name
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[v2 Import] Failed to extract cover from resources', err)
+      }
+    }
+
+    if (coverBlob) {
+      const cover: BookCover = {
+        bookFingerprint,
+        blob: coverBlob,
+        mimeType: coverMimeType,
+      }
+      await db.bookCovers.put(cover)
+      console.log('[v2 Import] Cover extracted and stored', { bookFingerprint, mimeType: coverMimeType })
+    } else {
+      console.log('[v2 Import] No cover found for book', bookFingerprint)
+    }
+  } catch (err) {
+    console.error('[v2 Import] Error extracting cover', err)
+    // Don't throw - cover extraction is optional
+  }
 }
 
 async function parseAndStoreChapters(bookFingerprint: string, file: File) {
@@ -260,12 +386,17 @@ async function loadChapterHtmlFromBook(bookEpub: any, href: string, spineItem: a
 
 
 export async function deleteLocalBook(bookFingerprint: string) {
-  await db.transaction('rw', db.books, db.bookFiles, db.v2Progress, db.v2Chapters, db.v2ImportStatus, async () => {
+  // Split into two transactions to avoid Dexie's store limit
+  await db.transaction('rw', db.books, db.bookFiles, db.v2Progress, db.v2Chapters, async () => {
     await db.books.delete(bookFingerprint)
     await db.bookFiles.delete(bookFingerprint)
     await db.v2Progress.where('bookFingerprint').equals(bookFingerprint).delete()
     await db.v2Chapters.where('bookFingerprint').equals(bookFingerprint).delete()
+  })
+  
+  await db.transaction('rw', db.v2ImportStatus, db.bookCovers, async () => {
     await db.v2ImportStatus.delete(bookFingerprint)
+    await db.bookCovers.delete(bookFingerprint)
   })
 }
 

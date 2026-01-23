@@ -6,20 +6,43 @@ import { useRouter } from 'next/navigation'
 import { BookOpen, Upload, Trash2 } from 'lucide-react'
 import OfflineIndicator from '@/components/OfflineIndicator'
 import DriveSyncButton from '@/components/DriveSyncButton'
-import { db, BookLocal } from '@/storage/db'
+import { db, BookLocal, BookCover } from '@/storage/db'
 import { deleteLocalBook, importLocalEpub } from '@/lib/localLibrary'
+
+interface BookWithCover extends BookLocal {
+  coverUrl?: string | null
+}
 
 export default function BookshelfPageV2() {
   const router = useRouter()
-  const [books, setBooks] = useState<BookLocal[]>([])
+  const [books, setBooks] = useState<BookWithCover[]>([])
   const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
+  const [failedCovers, setFailedCovers] = useState<Set<string>>(new Set())
 
   const loadBooks = async () => {
     const list = await db.books.orderBy('addedAtMs').reverse().toArray()
-    setBooks(list)
+    
+    // Load covers for each book
+    const booksWithCovers: BookWithCover[] = await Promise.all(
+      list.map(async (book) => {
+        const cover = await db.bookCovers.get(book.bookFingerprint)
+        let coverUrl: string | null = null
+        
+        if (cover) {
+          coverUrl = URL.createObjectURL(cover.blob)
+        }
+        
+        return {
+          ...book,
+          coverUrl,
+        }
+      })
+    )
+    
+    setBooks(booksWithCovers)
   }
 
   useEffect(() => {
@@ -27,6 +50,17 @@ export default function BookshelfPageV2() {
       .catch((e) => console.error(e))
       .finally(() => setLoading(false))
   }, [])
+
+  // Cleanup blob URLs on unmount
+  useEffect(() => {
+    return () => {
+      books.forEach((book) => {
+        if (book.coverUrl && book.coverUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(book.coverUrl)
+        }
+      })
+    }
+  }, [books])
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -100,8 +134,19 @@ export default function BookshelfPageV2() {
                 className="bg-white dark:bg-slate-800 rounded-lg shadow-sm hover:shadow-md transition-shadow overflow-hidden relative group"
               >
                 <Link href={`/reader/${book.bookFingerprint}`} className="block">
-                  <div className="aspect-[3/4] bg-gray-200 dark:bg-slate-700 flex items-center justify-center">
-                    <BookOpen className="h-12 w-12 text-gray-400 stroke-[1.5]" />
+                  <div className="aspect-[3/4] bg-gray-200 dark:bg-slate-700 flex items-center justify-center overflow-hidden">
+                    {book.coverUrl && !failedCovers.has(book.bookFingerprint) ? (
+                      <img
+                        src={book.coverUrl}
+                        alt={book.title}
+                        className="w-full h-full object-cover"
+                        onError={() => {
+                          setFailedCovers((prev) => new Set(prev).add(book.bookFingerprint))
+                        }}
+                      />
+                    ) : (
+                      <BookOpen className="h-12 w-12 text-gray-400 stroke-[1.5]" />
+                    )}
                   </div>
                   <div className="p-3">
                     <h3 className="font-medium text-sm text-gray-900 dark:text-white line-clamp-2">{book.title}</h3>
