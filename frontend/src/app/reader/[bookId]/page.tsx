@@ -40,6 +40,7 @@ export default function ReaderPageV2() {
 
   const [progress, setProgress] = useState<V2Progress | null>(null)
   const [importStatus, setImportStatus] = useState<V2ImportStatus | null>(null)
+  const hasRestoredPositionRef = useRef(false) // Flag để chỉ khôi phục vị trí một lần
 
   const loadInitial = useCallback(async () => {
     try {
@@ -129,6 +130,7 @@ export default function ReaderPageV2() {
     pause,
     stop,
     seek,
+    setSentenceIndex,
     prev,
     next,
     isSupported,
@@ -189,6 +191,8 @@ export default function ReaderPageV2() {
         setLoadingSentences(true)
         setSentences([])
         setSentencesError(null)
+        // Reset flag khi load chapter mới để có thể khôi phục vị trí cho chapter này
+        hasRestoredPositionRef.current = false
 
         let html = chapter.xhtmlHtml
         if (index === 1) {
@@ -414,22 +418,108 @@ export default function ReaderPageV2() {
     [chapters, stop],
   )
 
+  // Tìm và khôi phục chương đã đọc lần cuối (giống v1)
   useEffect(() => {
     if (!chapters.length) return
+    hasRestoredPositionRef.current = false // Reset flag khi chapters thay đổi
     ;(async () => {
-      const last = await db.v2Progress.where('bookFingerprint').equals(bookFingerprint).first()
-      if (last) {
-        setProgress(last)
-        const idx = chapters.findIndex((ch) => ch.chapterId === last.chapterId)
-        const chapterIndex = idx >= 0 ? idx : 0
-        setCurrentChapterIndex(chapterIndex)
-        await loadChapter(chapterIndex)
-      } else {
+      try {
+        // Lấy tất cả progress của sách, sắp xếp theo thời gian giảm dần để lấy progress mới nhất
+        const allProgress = await db.v2Progress.where('bookFingerprint').equals(bookFingerprint).toArray()
+        if (allProgress.length > 0) {
+          const lastProgress = allProgress.sort((a, b) => {
+            const dateA = a.updatedAtMs || 0
+            const dateB = b.updatedAtMs || 0
+            return dateB - dateA
+          })[0]
+          
+          setProgress(lastProgress)
+          const idx = chapters.findIndex((ch) => ch.chapterId === lastProgress.chapterId)
+          const chapterIndex = idx >= 0 ? idx : 0
+          setCurrentChapterIndex(chapterIndex)
+          await loadChapter(chapterIndex)
+        } else {
+          await loadChapter(0)
+        }
+      } catch (error) {
+        console.error('Failed to find last read chapter:', error)
         await loadChapter(0)
       }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chapters.length])
+
+  // Khôi phục voice và rate đã lưu (sau khi voices đã load)
+  useEffect(() => {
+    if (!progress || voicesLoading || voices.length === 0) return
+    if (progress.ttsVoice) {
+      const voice = voices.find((v) => v.name === progress.ttsVoice)
+      if (voice) {
+        setSelectedVoice(voice)
+      }
+    }
+    if (progress.ttsRate !== undefined) {
+      setRate(progress.ttsRate)
+    }
+  }, [progress, voices, voicesLoading, setSelectedVoice, setRate])
+
+  // Khôi phục vị trí câu sau khi sentences được load và progress có sẵn
+  // Chờ useTts hook reset xong rồi mới khôi phục
+  useEffect(() => {
+    if (!progress || sentences.length === 0 || !currentChapter) return
+    if (hasRestoredPositionRef.current) return // Đã khôi phục rồi, không làm lại
+    
+    // Chỉ khôi phục nếu progress thuộc về chapter hiện tại
+    if (progress.chapterId === currentChapter.chapterId && progress.sentenceIndex >= 0) {
+      // Kiểm tra sentenceIndex hợp lệ
+      if (progress.sentenceIndex >= sentences.length) {
+        console.warn('[v2 Reader] Saved sentenceIndex out of bounds:', {
+          saved: progress.sentenceIndex,
+          total: sentences.length,
+        })
+        hasRestoredPositionRef.current = true // Đánh dấu đã xử lý để không thử lại
+        return
+      }
+      
+      // Đợi useTts hook reset xong (thường reset về 0 khi sentences thay đổi)
+      // Đợi đủ lâu để đảm bảo useTts đã reset và DOM đã render
+      const timer = setTimeout(() => {
+        if (!hasRestoredPositionRef.current && progress.sentenceIndex < sentences.length && progress.sentenceIndex >= 0) {
+          const targetSentence = sentences[progress.sentenceIndex]
+          if (!targetSentence) {
+            console.warn('[v2 Reader] Target sentence not found:', progress.sentenceIndex)
+            hasRestoredPositionRef.current = true
+            return
+          }
+          
+          console.log('[v2 Reader] Restoring reading position:', {
+            chapterId: progress.chapterId,
+            sentenceIndex: progress.sentenceIndex,
+            totalSentences: sentences.length,
+            currentIndex: currentSentenceIndex,
+            sentenceText: targetSentence.text.substring(0, 50),
+            isPlaying,
+          })
+          
+          // Chỉ set vị trí mà không play (tránh tự động play khi chuyển chương)
+          // Nếu người dùng đang play, họ sẽ bấm play lại và sẽ đọc từ vị trí này
+          setSentenceIndex(progress.sentenceIndex)
+          
+          // Scroll đến vị trí đó trong DOM
+          setTimeout(() => {
+            const markerElement = document.getElementById(targetSentence.markerId)
+            if (markerElement && mainRef.current) {
+              markerElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            }
+          }, 100)
+          
+          hasRestoredPositionRef.current = true
+        }
+      }, 600) // Tăng thời gian đợi để đảm bảo useTts đã reset xong
+      
+      return () => clearTimeout(timer)
+    }
+  }, [progress, sentences.length, currentChapter, seek, currentSentenceIndex])
 
   const handleSentenceClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {

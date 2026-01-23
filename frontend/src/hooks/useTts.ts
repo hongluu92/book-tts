@@ -258,6 +258,13 @@ export function useTts(options: UseTtsOptions) {
     }
   }, [sentences, currentSentenceIndex, stop])
 
+  // Expose setCurrentSentenceIndex for restoring position without playing
+  const setSentenceIndex = useCallback((index: number) => {
+    if (index >= 0 && index < sentences.length) {
+      setCurrentSentenceIndex(index)
+    }
+  }, [sentences.length])
+
   return {
     isPlaying,
     isPaused,
@@ -272,6 +279,7 @@ export function useTts(options: UseTtsOptions) {
     pause,
     stop,
     seek,
+    setSentenceIndex, // For restoring position without playing
     prev,
     next,
     isSupported: engineRef.current?.isSupported() ?? false,
