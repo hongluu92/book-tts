@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Inter, Crimson_Text } from 'next/font/google'
 import './globals.css'
 import DevServiceWorkerCleaner from '@/components/DevServiceWorkerCleaner'
@@ -18,17 +18,18 @@ export const metadata: Metadata = {
   title: 'EPUB Reader',
   description: 'Read EPUB books with sentence-level TTS',
   manifest: '/manifest.json',
-  themeColor: '#2563EB',
-  viewport: {
-    width: 'device-width',
-    initialScale: 1,
-    viewportFit: 'cover',
-  },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
     title: 'EPUB Reader',
   },
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#2563EB',
 }
 
 export default function RootLayout({
@@ -40,6 +41,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <link rel="manifest" href="/manifest.json" />
+        <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="EPUB Reader" />
