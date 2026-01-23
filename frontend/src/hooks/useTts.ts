@@ -219,6 +219,19 @@ export function useTts(options: UseTtsOptions) {
     [stop, playSentence],
   )
 
+  // Seek to a sentence and immediately start playing from there.
+  // This is used for UX like double-click-to-read-from-here.
+  const playFrom = useCallback(
+    (index: number) => {
+      if (index < 0 || index >= sentences.length) return
+      stop()
+      setCurrentSentenceIndex(index)
+      isPlayingRef.current = true
+      playSentence(index)
+    },
+    [sentences.length, stop, playSentence],
+  )
+
   const prev = useCallback(() => {
     if (currentSentenceIndex > 0) {
       seek(currentSentenceIndex - 1)
@@ -310,6 +323,7 @@ export function useTts(options: UseTtsOptions) {
     pause,
     stop,
     seek,
+    playFrom,
     setSentenceIndex, // For restoring position without playing
     prev,
     next,

@@ -183,6 +183,7 @@ export default function ReaderPageV2() {
     pause,
     stop,
     seek,
+    playFrom,
     setSentenceIndex,
     prev,
     next,
@@ -389,6 +390,18 @@ export default function ReaderPageV2() {
     [seek],
   )
 
+  const handleSentenceDoubleClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      const target = e.target as HTMLElement
+      const span = target.closest('span[data-sent]')
+      if (!span) return
+      const sentenceIndex = parseInt(span.getAttribute('data-sent') || '0', 10)
+      playFrom(sentenceIndex)
+    },
+    [playFrom],
+  )
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (
@@ -532,6 +545,7 @@ export default function ReaderPageV2() {
           style={{ fontSize: `${fontSize}px` }}
           dangerouslySetInnerHTML={{ __html: chapterContent }}
           onClick={handleSentenceClick}
+          onDoubleClick={handleSentenceDoubleClick}
         />
       </main>
 
