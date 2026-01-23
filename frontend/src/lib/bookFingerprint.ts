@@ -7,9 +7,42 @@ function toHex(buffer: ArrayBuffer): string {
   return out
 }
 
+/**
+ * Simple hash function fallback when crypto.subtle is not available.
+ * Uses djb2 hash algorithm - not cryptographically secure but deterministic.
+ */
+function simpleHash(data: ArrayBuffer): string {
+  const bytes = new Uint8Array(data)
+  let hash = 5381
+  for (let i = 0; i < bytes.length; i++) {
+    hash = ((hash << 5) + hash) + bytes[i]
+    hash = hash & hash // Convert to 32-bit integer
+  }
+  // Convert to hex string (64 chars to match SHA-256 output length)
+  return Math.abs(hash).toString(16).padStart(16, '0').repeat(4).slice(0, 64)
+}
+
 async function sha256(data: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', data)
-  return toHex(digest)
+  // Check if crypto.subtle is available (requires secure context - HTTPS)
+  if (typeof crypto === 'undefined' || !crypto.subtle) {
+    console.warn(
+      '[bookFingerprint] crypto.subtle is not available. ' +
+      'This may occur in non-HTTPS contexts or older browsers. ' +
+      'Using fallback hash function.'
+    )
+    return simpleHash(data)
+  }
+
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', data)
+    return toHex(digest)
+  } catch (error) {
+    console.warn(
+      '[bookFingerprint] crypto.subtle.digest failed, using fallback:',
+      error
+    )
+    return simpleHash(data)
+  }
 }
 
 export async function computeBookFingerprint(file: File): Promise<string> {
