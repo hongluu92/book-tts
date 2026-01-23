@@ -32,6 +32,65 @@ export default function ReaderPageV2() {
   const contentRef = useRef<HTMLDivElement>(null)
   const mainRef = useRef<HTMLDivElement>(null)
 
+  // Helper function to scroll to a sentence element
+  const scrollToSentence = useCallback((markerId: string) => {
+    if (!contentRef.current || !mainRef.current) {
+      console.log('[Reader] Cannot scroll - refs not ready')
+      return
+    }
+
+    const element = contentRef.current.querySelector(`#${markerId}`) as HTMLElement
+    const targetElement = element || (() => {
+      const sentenceIndex = markerId.match(/s-(\d+)/)?.[1]
+      if (sentenceIndex) {
+        return contentRef.current?.querySelector(`span[data-sent="${sentenceIndex}"]`) as HTMLElement
+      }
+      return null
+    })()
+
+    if (!targetElement) {
+      console.log('[Reader] Element not found for markerId:', markerId)
+      return
+    }
+
+    if (mainRef.current) {
+      // Use offsetTop for more reliable calculation
+      const elementOffsetTop = targetElement.offsetTop
+      const containerOffsetTop = mainRef.current.offsetTop || 0
+      const containerHeight = mainRef.current.clientHeight
+      const elementHeight = targetElement.offsetHeight
+      
+      // Calculate target scroll to center element
+      const targetScrollTop = elementOffsetTop - containerOffsetTop - (containerHeight / 2) + (elementHeight / 2)
+      
+      console.log('[Reader] Scroll debug:', {
+        markerId,
+        elementOffsetTop,
+        containerOffsetTop,
+        containerHeight,
+        elementHeight,
+        targetScrollTop,
+        currentScrollTop: mainRef.current.scrollTop,
+      })
+      
+      if (targetScrollTop >= 0 && Math.abs(targetScrollTop - mainRef.current.scrollTop) > 10) {
+        mainRef.current.scrollTo({
+          top: targetScrollTop,
+          behavior: 'smooth',
+        })
+        console.log('[Reader] Scrolled to sentence:', markerId, 'scrollTop:', targetScrollTop)
+      } else {
+        // Fallback to scrollIntoView
+        console.log('[Reader] Using scrollIntoView fallback')
+        targetElement.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+          inline: 'nearest',
+        })
+      }
+    }
+  }, [])
+
   const [progress, setProgress] = useState<V2Progress | null>(null)
   const [importStatus, setImportStatus] = useState<V2ImportStatus | null>(null)
 
@@ -158,29 +217,35 @@ export default function ReaderPageV2() {
   // This ensures the highlight is visible when TTS starts or when user seeks
   useSentenceHighlight(contentRef, currentMarkerId, true, mainRef)
 
-  // Force re-highlight when chapterContent changes (new chapter loaded)
+  // Force re-highlight and scroll when chapterContent changes (new chapter loaded)
   // This ensures highlight is applied after HTML is rendered
   useEffect(() => {
     if (currentMarkerId && contentRef.current && chapterContent) {
       // Small delay to ensure React has finished rendering the HTML
       const timer = setTimeout(() => {
-        const element = contentRef.current?.querySelector(`#${currentMarkerId}`) as HTMLElement
-        if (!element) {
-          // Try data-sent as fallback
-          const sentenceIndex = currentMarkerId.match(/s-(\d+)/)?.[1]
-          if (sentenceIndex) {
-            const fallbackElement = contentRef.current?.querySelector(`span[data-sent="${sentenceIndex}"]`) as HTMLElement
-            if (fallbackElement) {
-              // Remove all previous highlights
-              contentRef.current?.querySelectorAll('.tts-active').forEach((el) => el.classList.remove('tts-active'))
-              fallbackElement.classList.add('tts-active')
+        const findAndHighlight = () => {
+          let element = contentRef.current?.querySelector(`#${currentMarkerId}`) as HTMLElement
+          if (!element) {
+            // Try data-sent as fallback
+            const sentenceIndex = currentMarkerId.match(/s-(\d+)/)?.[1]
+            if (sentenceIndex) {
+              element = contentRef.current?.querySelector(`span[data-sent="${sentenceIndex}"]`) as HTMLElement
             }
           }
-        } else {
-          // Remove all previous highlights
-          contentRef.current?.querySelectorAll('.tts-active').forEach((el) => el.classList.remove('tts-active'))
-          element.classList.add('tts-active')
+          
+          if (element) {
+            // Remove all previous highlights
+            contentRef.current?.querySelectorAll('.tts-active').forEach((el) => el.classList.remove('tts-active'))
+            element.classList.add('tts-active')
+            
+            // Scroll to element
+            scrollToSentence(currentMarkerId)
+          }
         }
+        
+        findAndHighlight()
+        // Retry after a longer delay in case DOM wasn't ready
+        setTimeout(findAndHighlight, 300)
       }, 200)
       return () => clearTimeout(timer)
     }

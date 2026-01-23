@@ -10,6 +10,7 @@ export function useSentenceHighlight(
 ) {
   const elementRef = useRef<HTMLElement | null>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     // Clear any pending timeouts
@@ -17,13 +18,15 @@ export function useSentenceHighlight(
       clearTimeout(timeoutRef.current)
       timeoutRef.current = null
     }
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current)
+      scrollTimeoutRef.current = null
+    }
 
     if (!markerId || !contentRef.current) {
       elementRef.current = null
       return
     }
-
-    console.log('[useSentenceHighlight] Looking for markerId:', markerId, 'active:', active)
 
     // Remove previous highlights first
     const previousActive = contentRef.current.querySelectorAll('.tts-active')
@@ -83,35 +86,19 @@ export function useSentenceHighlight(
           return
         } else {
           console.warn(`[useSentenceHighlight] Could not find element with markerId: ${markerId} after ${maxRetries} retries`)
-          // Log available elements for debugging
-          if (contentRef.current) {
-            const allSpans = contentRef.current.querySelectorAll('span[id], span[data-sent]')
-            console.warn(`[useSentenceHighlight] Total spans found: ${allSpans.length}`)
-            console.warn(`[useSentenceHighlight] Available spans (first 10):`, Array.from(allSpans).slice(0, 10).map(s => ({
-              id: s.id,
-              dataSent: s.getAttribute('data-sent'),
-              text: s.textContent?.substring(0, 50),
-            })))
-            // Also log the HTML structure
-            console.warn(`[useSentenceHighlight] Content HTML preview:`, contentRef.current.innerHTML.substring(0, 500))
-          }
           return
         }
       }
 
       // Element found - store reference and apply highlight
       elementRef.current = element
-      console.log('[useSentenceHighlight] Found element:', element, 'active:', active)
       
       // Always add highlight class when element is found and active is true
       if (active) {
         element.classList.add('tts-active')
-        console.log('[useSentenceHighlight] Applied highlight class to element')
-      } else {
-        console.log('[useSentenceHighlight] Not applying highlight (active is false)')
       }
 
-      // Scroll to element (always scroll, even if not active yet)
+      // Debounced scroll to element (avoid jitter)
       const scrollToElement = () => {
         const el = elementRef.current
         if (!el) return
@@ -120,30 +107,36 @@ export function useSentenceHighlight(
           if (scrollContainerRef?.current) {
             // Use scroll container if provided
             const container = scrollContainerRef.current
-            const elementRect = el.getBoundingClientRect()
-            const containerRect = container.getBoundingClientRect()
-            
-            // Calculate scroll position to center element in container
-            const scrollTop = container.scrollTop + elementRect.top - containerRect.top - (containerRect.height / 2) + (elementRect.height / 2)
-            
-            container.scrollTo({
-              top: scrollTop,
-              behavior: 'smooth',
-            })
+            const containerHeight = container.clientHeight
+            const elementOffsetTop = el.offsetTop
+            const elementHeight = el.offsetHeight
+            const targetScrollTop = elementOffsetTop - containerHeight / 2 + elementHeight / 2
+
+            container.scrollTo({ top: Math.max(0, targetScrollTop), behavior: 'smooth' })
           } else {
             // Fallback to scrollIntoView
             el.scrollIntoView({
               behavior: 'smooth',
               block: 'center',
+              inline: 'nearest',
             })
           }
         } catch (err) {
           console.warn('[useSentenceHighlight] Error scrolling to element:', err)
+          try {
+            el.scrollIntoView({
+              behavior: 'smooth',
+              block: 'center',
+              inline: 'nearest',
+            })
+          } catch (e) {
+            // ignore
+          }
         }
       }
 
-      // Scroll immediately when markerId changes (when TTS moves to new sentence)
-      setTimeout(scrollToElement, 50)
+      // Scroll once per marker change (debounced)
+      scrollTimeoutRef.current = setTimeout(scrollToElement, 120)
     }
 
     // Start the find and highlight process after a small delay to ensure DOM is ready
@@ -157,6 +150,10 @@ export function useSentenceHighlight(
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
         timeoutRef.current = null
+      }
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current)
+        scrollTimeoutRef.current = null
       }
       if (elementRef.current && !active) {
         elementRef.current.classList.remove('tts-active')
