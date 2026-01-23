@@ -3,14 +3,138 @@ const withPWA = require('next-pwa')({
   register: true,
   skipWaiting: true,
   disable: process.env.NODE_ENV === 'development',
+  buildExcludes: [
+    /middleware-manifest\.json$/,
+    /app-build-manifest\.json$/,
+    /react-loadable-manifest\.json$/,
+  ],
+  fallbacks: {
+    document: '/offline',
+  },
+  // Bật cache để app chạy offline, nhưng vẫn check update khi có code mới
   runtimeCaching: [
+    // Navigation requests (HTML pages): NetworkFirst với fallback về cache
+    // Quan trọng: Phải có fallback để app chạy offline
+    {
+      urlPattern: ({ request }) => request.mode === 'navigate',
+      handler: 'NetworkFirst',
+      options: {
+        cacheName: 'pages-cache',
+        networkTimeoutSeconds: 3,
+        expiration: {
+          maxEntries: 50,
+          maxAgeSeconds: 24 * 60 * 60, // 24 hours
+        },
+        cacheableResponse: {
+          statuses: [0, 200],
+        },
+        plugins: [
+          {
+            cacheWillUpdate: async ({ response }) => {
+              // Chỉ cache responses thành công
+              return response && response.status === 200 ? response : null
+            },
+          },
+        ],
+      },
+    },
+    // HTML và JS files: NetworkFirst với fallback về cache (quan trọng cho offline)
+    {
+      urlPattern: /\.(?:html|js)$/,
+      handler: 'NetworkFirst',
+      options: {
+        cacheName: 'html-js-cache',
+        networkTimeoutSeconds: 2, // Giảm timeout để fallback nhanh hơn khi offline
+        expiration: {
+          maxEntries: 50,
+          maxAgeSeconds: 24 * 60 * 60, // 24 hours
+        },
+        cacheableResponse: {
+          statuses: [0, 200],
+        },
+        plugins: [
+          {
+            cacheWillUpdate: async ({ response }) => {
+              return response && response.status === 200 ? response : null
+            },
+          },
+        ],
+      },
+    },
+    // Next.js static assets: CacheFirst để ưu tiên cache (offline first)
+    {
+      urlPattern: /^\/_next\/static\/.*/i,
+      handler: 'CacheFirst',
+      options: {
+        cacheName: 'next-static-assets',
+        expiration: {
+          maxEntries: 100,
+          maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
+        },
+        cacheableResponse: {
+          statuses: [0, 200],
+        },
+      },
+    },
+    // Images: CacheFirst để ưu tiên cache (offline first)
+    {
+      urlPattern: /\.(?:jpg|jpeg|gif|png|svg|ico|webp)$/i,
+      handler: 'CacheFirst',
+      options: {
+        cacheName: 'image-cache',
+        expiration: {
+          maxEntries: 100,
+          maxAgeSeconds: 7 * 24 * 60 * 60, // 7 days
+        },
+        cacheableResponse: {
+          statuses: [0, 200],
+        },
+      },
+    },
+    // CSS files: CacheFirst để ưu tiên cache (offline first)
+    {
+      urlPattern: /\.(?:css)$/i,
+      handler: 'CacheFirst',
+      options: {
+        cacheName: 'css-cache',
+        expiration: {
+          maxEntries: 50,
+          maxAgeSeconds: 7 * 24 * 60 * 60, // 7 days
+        },
+        cacheableResponse: {
+          statuses: [0, 200],
+        },
+      },
+    },
+    // API calls: NetworkFirst với timeout ngắn
+    {
+      urlPattern: /^https?:\/\/.*\/api\/.*/i,
+      handler: 'NetworkFirst',
+      options: {
+        cacheName: 'api-cache',
+        networkTimeoutSeconds: 5,
+        expiration: {
+          maxEntries: 50,
+          maxAgeSeconds: 5 * 60, // 5 minutes
+        },
+        cacheableResponse: {
+          statuses: [0, 200],
+        },
+      },
+    },
+    // Tất cả các requests khác: NetworkFirst với fallback về cache
     {
       urlPattern: /^https?.*/,
       handler: 'NetworkFirst',
       options: {
-        cacheName: 'offlineCache',
+        cacheName: 'offline-cache',
+        networkTimeoutSeconds: 3,
         expiration: {
           maxEntries: 200,
+          maxAgeSeconds: 24 * 60 * 60, // 24 hours
+        },
+        cacheableResponse: {
+          statuses: [0, 200],
         },
       },
     },

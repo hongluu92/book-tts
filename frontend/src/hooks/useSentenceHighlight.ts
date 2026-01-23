@@ -60,7 +60,8 @@ export function useSentenceHighlight(
       // If still not found, try finding by any span with matching id pattern
       if (!element) {
         const allSpans = contentRef.current.querySelectorAll('span[id]')
-        for (const span of allSpans) {
+        const spansArray = Array.from(allSpans)
+        for (const span of spansArray) {
           if (span.id === markerId || span.id.endsWith(markerId)) {
             element = span as HTMLElement
             break
