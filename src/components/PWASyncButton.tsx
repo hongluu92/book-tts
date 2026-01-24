@@ -43,7 +43,7 @@ export default function PWASyncButton() {
         await registration.update()
       } catch (error) {
         // Service worker chưa ready hoặc chưa có - không sao
-        console.log('Service worker not ready yet:', error)
+        console.warn('Service worker not ready yet:', error)
       }
     }
 

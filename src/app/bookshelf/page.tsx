@@ -5,8 +5,7 @@ import Link from 'next/link'
 import { BookOpen, Upload, Trash2 } from 'lucide-react'
 import OfflineIndicator from '@/components/OfflineIndicator'
 import DriveSyncButton from '@/components/DriveSyncButton'
-import PWASyncButton from '@/components/PWASyncButton'
-import { db, BookLocal, BookCover } from '@/storage/db'
+import { db, BookLocal } from '@/storage/db'
 import { deleteLocalBook, importLocalEpub } from '@/lib/localLibrary'
 
 interface BookWithCover extends BookLocal {
@@ -99,7 +98,6 @@ export default function BookshelfPageV2() {
           </div>
           <div className="flex items-center gap-4">
             <OfflineIndicator />
-            <PWASyncButton />
             <DriveSyncButton />
           </div>
         </div>

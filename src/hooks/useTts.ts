@@ -117,23 +117,13 @@ export function useTts(options: UseTtsOptions) {
 
   const playSentence = useCallback(
     async (index: number) => {
-      console.log('[useTts] playSentence called:', {
-        index,
-        sentencesCount: sentences.length,
-        hasEngine: !!engineRef.current
-      })
       if (!engineRef.current || index < 0 || index >= sentences.length) {
-        console.log('[useTts] playSentence returning early - invalid index or no engine')
         return
       }
 
       const sentence = sentences[index]
-      if (!sentence) {
-        console.log('[useTts] playSentence returning early - no sentence at index')
-        return
-      }
+      if (!sentence) return
 
-      console.log('[useTts] Playing sentence:', sentence.text?.substring(0, 50))
       setCurrentSentenceIndex(index)
       onProgress?.(index)
 
@@ -157,13 +147,6 @@ export function useTts(options: UseTtsOptions) {
             return
           }
 
-          console.log('[useTts] onEnd:', {
-            index,
-            total: sentences.length,
-            isPlayingRef: isPlayingRef.current,
-            isLastSentence: index === sentences.length - 1
-          })
-
           // Auto-play next sentence if still playing
           if (isPlayingRef.current && index < sentences.length - 1) {
             playSentence(index + 1)
@@ -172,7 +155,6 @@ export function useTts(options: UseTtsOptions) {
             isPlayingRef.current = false
             // Trigger chapter end callback when last sentence finishes
             if (index === sentences.length - 1) {
-              console.log('[useTts] Last sentence finished, calling onChapterEnd')
               onChapterEnd?.()
             }
           }
@@ -199,12 +181,6 @@ export function useTts(options: UseTtsOptions) {
   )
 
   const play = useCallback(() => {
-    console.log('[useTts] play() called:', {
-      hasEngine: !!engineRef.current,
-      isPaused,
-      currentSentenceIndex,
-      sentencesCount: sentences.length
-    })
     if (!engineRef.current) return
 
     // Reload voices on first play (iOS requirement - voices only load after user interaction)
@@ -213,15 +189,13 @@ export function useTts(options: UseTtsOptions) {
     }
 
     if (isPaused) {
-      console.log('[useTts] Resuming from pause')
       engineRef.current.resume()
       setIsPaused(false)
     } else {
-      console.log('[useTts] Starting playback from sentence:', currentSentenceIndex)
       isPlayingRef.current = true
       playSentence(currentSentenceIndex)
     }
-  }, [isPaused, currentSentenceIndex, playSentence, voices.length, voicesLoading, loadAndSelectVoice, sentences.length])
+  }, [isPaused, currentSentenceIndex, playSentence, voices.length, voicesLoading, loadAndSelectVoice])
 
   const pause = useCallback(() => {
     if (engineRef.current) {

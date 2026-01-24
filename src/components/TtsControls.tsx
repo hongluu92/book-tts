@@ -124,41 +124,10 @@ export default function TtsControls({
           </div>
         )}
 
-        {/* Main Controls - YouTube style, all on one row */}
+        {/* Main Controls - Play left, Settings right */}
         {!loading && !error && hasSentences && (
           <div className="flex items-center justify-between gap-4">
-            {/* Left: Settings (Rate) */}
-            <div className="flex items-center gap-2">
-              {/* Rate Dropdown - Opens upward */}
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  disabled={isDisabled}
-                  className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-9 px-3 text-sm')}
-                >
-                  {rate.toFixed(2)}x
-                </DropdownMenuTrigger>
-                <DropdownMenuContent side="top">
-                  {rateOptions.map((option) => (
-                    <DropdownMenuItem
-                      key={option}
-                      onSelect={() => {
-                        if (option !== rate) {
-                          onRateChange(option)
-                        }
-                      }}
-                      className={cn(
-                        "cursor-pointer",
-                        rate === option && "bg-accent"
-                      )}
-                    >
-                      {option.toFixed(2)}x
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-
-            {/* Center: Play controls */}
+            {/* Left: Play button + Chapter navigation */}
             <div className="flex items-center gap-2">
               <Button
                 onClick={onPrevChapter}
@@ -195,21 +164,44 @@ export default function TtsControls({
               >
                 <ChevronRight className="h-5 w-5 stroke-[2]" />
               </Button>
-
-              {/* Progress indicator */}
-              <span className="text-xs text-muted-foreground ml-2 whitespace-nowrap">
-                {currentChapterIndex + 1} / {totalChapters}
-              </span>
             </div>
 
-            {/* Right: Settings (Voice) */}
+            {/* Right: Rate + Voice controls */}
             <div className="flex items-center gap-2">
+              {/* Rate Dropdown - Opens upward */}
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  disabled={isDisabled}
+                  className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-9 px-3 text-sm')}
+                >
+                  {rate.toFixed(2)}x
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top">
+                  {rateOptions.map((option) => (
+                    <DropdownMenuItem
+                      key={option}
+                      onSelect={() => {
+                        if (option !== rate) {
+                          onRateChange(option)
+                        }
+                      }}
+                      className={cn(
+                        "cursor-pointer",
+                        rate === option && "bg-accent"
+                      )}
+                    >
+                      {option.toFixed(2)}x
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
               {/* Voice Select with Search */}
               {voicesLoading ? (
                 <span className="text-xs text-muted-foreground px-2">Đang tải...</span>
               ) : (
-                <DropdownMenu 
-                  open={voiceSearchOpen} 
+                <DropdownMenu
+                  open={voiceSearchOpen}
                   onOpenChange={(open) => {
                     setVoiceSearchOpen(open)
                     if (!open) {

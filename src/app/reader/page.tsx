@@ -54,7 +54,6 @@ function ReaderContent() {
   // Helper function to scroll to a sentence element
   const scrollToSentence = useCallback((markerId: string) => {
     if (!contentRef.current || !mainRef.current) {
-      console.log('[Reader] Cannot scroll - refs not ready')
       return
     }
 
@@ -68,7 +67,6 @@ function ReaderContent() {
     })()
 
     if (!targetElement) {
-      console.log('[Reader] Element not found for markerId:', markerId)
       return
     }
 
@@ -81,26 +79,14 @@ function ReaderContent() {
       
       // Calculate target scroll to center element
       const targetScrollTop = elementOffsetTop - containerOffsetTop - (containerHeight / 2) + (elementHeight / 2)
-      
-      console.log('[Reader] Scroll debug:', {
-        markerId,
-        elementOffsetTop,
-        containerOffsetTop,
-        containerHeight,
-        elementHeight,
-        targetScrollTop,
-        currentScrollTop: mainRef.current.scrollTop,
-      })
-      
+
       if (targetScrollTop >= 0 && Math.abs(targetScrollTop - mainRef.current.scrollTop) > 10) {
         mainRef.current.scrollTo({
           top: targetScrollTop,
           behavior: 'smooth',
         })
-        console.log('[Reader] Scrolled to sentence:', markerId, 'scrollTop:', targetScrollTop)
       } else {
         // Fallback to scrollIntoView
-        console.log('[Reader] Using scrollIntoView fallback')
         targetElement.scrollIntoView({
           behavior: 'smooth',
           block: 'center',
@@ -228,17 +214,13 @@ function ReaderContent() {
     },
     onProgress: () => {},
     onChapterEnd: () => {
-      console.log('[onChapterEnd] Triggered, currentChapter:', currentChapterIndex, 'total:', chapters.length)
       // Auto-advance to next chapter when current chapter finishes
       if (currentChapterIndex < chapters.length - 1) {
         const nextIndex = currentChapterIndex + 1
-        console.log('[onChapterEnd] Loading next chapter:', nextIndex)
         // Set flag to auto-play after chapter loads
         autoPlayNextChapterRef.current = true
         setCurrentChapterIndex(nextIndex)
         loadChapter(nextIndex)  // loadChapter will call stop() internally
-      } else {
-        console.log('[onChapterEnd] Last chapter, not advancing')
       }
     },
   })
@@ -250,15 +232,8 @@ function ReaderContent() {
 
   // Auto-play after chapter loads when onChapterEnd was triggered
   useEffect(() => {
-    console.log('[Auto-play] Effect running:', {
-      flag: autoPlayNextChapterRef.current,
-      loading: loadingSentences,
-      sentencesCount: sentences.length,
-      chapterIndex: currentChapterIndex
-    })
     // Only auto-play if flag is set, chapter is done loading, and sentences are available
     if (autoPlayNextChapterRef.current && !loadingSentences && sentences.length > 0) {
-      console.log('[Auto-play] Conditions met, calling playFrom(0) directly')
       // Reset flag first to prevent double-play
       autoPlayNextChapterRef.current = false
       // Use playFrom(0) to explicitly start from beginning of new chapter
