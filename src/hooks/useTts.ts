@@ -14,7 +14,7 @@ interface UseTtsOptions {
 
 export function useTts(options: UseTtsOptions) {
   const { sentences, onSentenceStart, onSentenceEnd, onProgress, onChapterEnd } = options
-  
+
   const [isPlaying, setIsPlaying] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [currentSentenceIndex, setCurrentSentenceIndex] = useState(0)
@@ -25,8 +25,8 @@ export function useTts(options: UseTtsOptions) {
 
   const engineRef = useRef<BrowserSpeechEngine | null>(null)
   const isPlayingRef = useRef(false)
-  const prevRateRef = useRef(1.0) // Initialize with default rate
-  const isRestartingRef = useRef(false) // Flag to prevent auto-play during rate change restart
+  const prevRateRef = useRef(1.0)
+  const isRestartingRef = useRef(false)
 
   const loadAndSelectVoice = useCallback(async () => {
     if (!engineRef.current || !engineRef.current.isSupported()) {
@@ -36,14 +36,11 @@ export function useTts(options: UseTtsOptions) {
 
     try {
       const loadedVoices = await engineRef.current.getVoices()
-      
+
       setVoices(loadedVoices)
       setVoicesLoading(false)
-      
-      // Only auto-select if no voice is currently selected
+
       if (!selectedVoice && loadedVoices.length > 0) {
-        // Auto-select Vietnamese voice if available
-        // Try multiple strategies to find Vietnamese voice
         const vietnameseVoice = loadedVoices.find((v) => {
           const lang = v.lang.toLowerCase()
           const name = v.name.toLowerCase()
@@ -55,12 +52,10 @@ export function useTts(options: UseTtsOptions) {
             name.includes('viet')
           )
         })
-        
+
         if (vietnameseVoice) {
           setSelectedVoice(vietnameseVoice)
         } else {
-          // Fallback: try to find a voice with Vietnamese-like characteristics
-          // or just use the first available voice
           const defaultVoice = loadedVoices.find((v) => v.default) || loadedVoices[0]
           setSelectedVoice(defaultVoice)
         }
@@ -73,34 +68,30 @@ export function useTts(options: UseTtsOptions) {
 
   useEffect(() => {
     engineRef.current = new BrowserSpeechEngine()
-    
+
     if (engineRef.current.isSupported()) {
-      // Initial load
       loadAndSelectVoice()
-      
-      // Listen for voices changed event (some browsers load voices asynchronously)
+
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         const handleVoicesChanged = () => {
           loadAndSelectVoice()
         }
-        
+
         speechSynthesis.onvoiceschanged = handleVoicesChanged
-        
+
         return () => {
-          // Cleanup: stop TTS and remove event listener
           if (engineRef.current) {
             engineRef.current.cancel()
             setIsPlaying(false)
             setIsPaused(false)
             isPlayingRef.current = false
           }
-          
+
           if (speechSynthesis.onvoiceschanged === handleVoicesChanged) {
             speechSynthesis.onvoiceschanged = null
           }
         }
       } else {
-        // Cleanup even if not supported
         return () => {
           if (engineRef.current) {
             engineRef.current.cancel()
@@ -134,33 +125,30 @@ export function useTts(options: UseTtsOptions) {
           setIsPlaying(true)
           setIsPaused(false)
           isPlayingRef.current = true
-          // Clear restart flag when new utterance starts
           isRestartingRef.current = false
           onSentenceStart?.(sentence)
         },
         onEnd: () => {
           onSentenceEnd?.(sentence)
 
-          // Don't auto-play next if we're restarting due to rate change
-          // The flag will be cleared in onStart of the new utterance
           if (isRestartingRef.current) {
             return
           }
 
           // Auto-play next sentence if still playing
           if (isPlayingRef.current && index < sentences.length - 1) {
-            playSentence(index + 1)
+            playSentence(index + 1).catch((err) => {
+              console.error('Failed to play next sentence:', err)
+            })
           } else {
             setIsPlaying(false)
             isPlayingRef.current = false
-            // Trigger chapter end callback when last sentence finishes
             if (index === sentences.length - 1) {
               onChapterEnd?.()
             }
           }
         },
         onError: (error) => {
-          // Only log non-interrupted errors
           if (!error.message.includes('interrupted') && !error.message.includes('canceled')) {
             console.error('TTS error:', error)
           }
@@ -170,7 +158,11 @@ export function useTts(options: UseTtsOptions) {
       }
 
       try {
-        await engineRef.current.speak(sentence.text, ttsOptions)
+        engineRef.current.speak(sentence.text, ttsOptions).catch((error) => {
+          console.error('Failed to speak:', error)
+          setIsPlaying(false)
+          isPlayingRef.current = false
+        })
       } catch (error) {
         console.error('Failed to speak:', error)
         setIsPlaying(false)
@@ -183,14 +175,22 @@ export function useTts(options: UseTtsOptions) {
   const play = useCallback(() => {
     if (!engineRef.current) return
 
-    // Reload voices on first play (iOS requirement - voices only load after user interaction)
     if (voices.length === 0 && !voicesLoading) {
       loadAndSelectVoice()
     }
 
     if (isPaused) {
-      engineRef.current.resume()
-      setIsPaused(false)
+      const isWindows = typeof window !== 'undefined' && navigator.userAgent.includes('Windows')
+      if (isWindows) {
+        console.log('[useTts] Windows detected: using cancel+play instead of resume')
+        engineRef.current.cancel()
+        setIsPaused(false)
+        isPlayingRef.current = true
+        playSentence(currentSentenceIndex)
+      } else {
+        engineRef.current.resume()
+        setIsPaused(false)
+      }
     } else {
       isPlayingRef.current = true
       playSentence(currentSentenceIndex)
@@ -224,8 +224,6 @@ export function useTts(options: UseTtsOptions) {
     [stop, playSentence],
   )
 
-  // Seek to a sentence and immediately start playing from there.
-  // This is used for UX like double-click-to-read-from-here.
   const playFrom = useCallback(
     (index: number) => {
       if (index < 0 || index >= sentences.length) return
@@ -249,65 +247,43 @@ export function useTts(options: UseTtsOptions) {
     }
   }, [currentSentenceIndex, sentences.length, seek])
 
-  // Track previous sentences to detect chapter changes
   const prevSentencesRef = useRef<Sentence[]>([])
 
-  // Reset TTS state when sentences change (new chapter loaded)
   useEffect(() => {
-    // Check if sentences array reference changed (new chapter loaded)
     const sentencesChanged = prevSentencesRef.current !== sentences
-    
+
     if (sentencesChanged) {
-      // Stop any playing TTS
       stop()
-      
-      // Reset to beginning of new chapter (sentence 0)
       setCurrentSentenceIndex(0)
       setIsPlaying(false)
       setIsPaused(false)
       isPlayingRef.current = false
-      
-      // Update ref
       prevSentencesRef.current = sentences
     } else if (sentences.length > 0 && currentSentenceIndex >= sentences.length) {
-      // Current index is out of bounds, reset to 0
       setCurrentSentenceIndex(0)
     }
   }, [sentences, currentSentenceIndex, stop])
 
-  // Restart current sentence when rate changes while playing
   useEffect(() => {
-    // Skip on initial mount
     if (prevRateRef.current === rate) return
-    
-    // If rate changed and TTS is currently playing (not paused), restart current sentence
+
     if (isPlayingRef.current && !isPaused && engineRef.current && sentences.length > 0) {
       const currentIndex = currentSentenceIndex
-      
-      // Set flag to prevent onEnd callback from auto-playing next sentence
-      // Flag will be cleared in onStart of the new utterance
       isRestartingRef.current = true
-      
-      // Cancel current utterance
       engineRef.current.cancel()
-      
-      // Restart current sentence with new rate
-      // Use a small delay to ensure cancellation is processed
+
       setTimeout(() => {
         if (isPlayingRef.current && currentIndex >= 0 && currentIndex < sentences.length) {
           playSentence(currentIndex)
         } else {
-          // If not playing anymore, clear the flag
           isRestartingRef.current = false
         }
       }, 50)
     }
-    
-    // Update previous rate
+
     prevRateRef.current = rate
   }, [rate, isPaused, currentSentenceIndex, sentences.length, playSentence])
 
-  // Expose setCurrentSentenceIndex for restoring position without playing
   const setSentenceIndex = useCallback((index: number) => {
     if (index >= 0 && index < sentences.length) {
       setCurrentSentenceIndex(index)
@@ -329,7 +305,7 @@ export function useTts(options: UseTtsOptions) {
     stop,
     seek,
     playFrom,
-    setSentenceIndex, // For restoring position without playing
+    setSentenceIndex,
     prev,
     next,
     isSupported: engineRef.current?.isSupported() ?? false,

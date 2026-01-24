@@ -103,7 +103,7 @@ export function useSentenceHighlight(
       const scrollToElement = () => {
         const el = elementRef.current
         if (!el) return
-        
+
         try {
           if (scrollContainerRef?.current) {
             // Use scroll container if provided
@@ -113,7 +113,25 @@ export function useSentenceHighlight(
             const elementHeight = el.offsetHeight
             const targetScrollTop = elementOffsetTop - containerHeight / 2 + elementHeight / 2
 
+            const beforeScroll = container.scrollTop
             container.scrollTo({ top: Math.max(0, targetScrollTop), behavior: 'smooth' })
+
+            // Windows Chrome fix: Check if scroll actually happened
+            // If not, fall back to scrollIntoView after a delay
+            setTimeout(() => {
+              if (el && container && Math.abs(container.scrollTop - beforeScroll) < 10) {
+                console.warn('[useSentenceHighlight] Scroll did not change, using scrollIntoView fallback')
+                try {
+                  el.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center',
+                    inline: 'nearest',
+                  })
+                } catch (e) {
+                  // ignore
+                }
+              }
+            }, 300)
           } else {
             // Fallback to scrollIntoView
             el.scrollIntoView({
@@ -136,8 +154,15 @@ export function useSentenceHighlight(
         }
       }
 
-      // Scroll once per marker change (debounced)
-      scrollTimeoutRef.current = setTimeout(scrollToElement, 120)
+      // Windows Chrome fix: Use double requestAnimationFrame + longer delay
+      // to ensure DOM layout is fully computed before scrolling
+      scrollTimeoutRef.current = setTimeout(() => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            scrollToElement()
+          })
+        })
+      }, 200) // Increased from 120ms to 200ms for Windows Chrome
     }
 
     // Start the find and highlight process after a small delay to ensure DOM is ready
