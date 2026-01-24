@@ -585,10 +585,22 @@ export default function ReaderPageV2() {
           voicesLoading={voicesLoading}
           currentSentenceIndex={currentSentenceIndex}
           totalSentences={sentences.length}
+          currentChapterIndex={currentChapterIndex}
+          totalChapters={chapters.length}
           onPlay={play}
           onPause={pause}
           onPrev={prev}
           onNext={next}
+          onPrevChapter={() => {
+            stop()
+            const newIndex = Math.max(0, currentChapterIndex - 1)
+            handleLoadChapter(newIndex)
+          }}
+          onNextChapter={() => {
+            stop()
+            const newIndex = Math.min(chapters.length - 1, currentChapterIndex + 1)
+            handleLoadChapter(newIndex)
+          }}
           onRateChange={setRate}
           onVoiceChange={setSelectedVoice}
           isSupported={isSupported}

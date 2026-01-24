@@ -20,10 +20,14 @@ interface TtsControlsProps {
   voicesLoading: boolean
   currentSentenceIndex: number
   totalSentences: number
+  currentChapterIndex: number
+  totalChapters: number
   onPlay: () => void
   onPause: () => void
   onPrev: () => void
   onNext: () => void
+  onPrevChapter: () => void
+  onNextChapter: () => void
   onRateChange: (rate: number) => void
   onVoiceChange: (voice: SpeechSynthesisVoice | null) => void
   isSupported: boolean
@@ -42,10 +46,14 @@ export default function TtsControls({
   voicesLoading,
   currentSentenceIndex,
   totalSentences,
+  currentChapterIndex,
+  totalChapters,
   onPlay,
   onPause,
   onPrev,
   onNext,
+  onPrevChapter,
+  onNextChapter,
   onRateChange,
   onVoiceChange,
   isSupported,
@@ -119,51 +127,7 @@ export default function TtsControls({
         {/* Main Controls - YouTube style, all on one row */}
         {!loading && !error && hasSentences && (
           <div className="flex items-center justify-between gap-4">
-            {/* Left: Play controls */}
-            <div className="flex items-center gap-2">
-              <Button
-                onClick={onPrev}
-                disabled={isDisabled || currentSentenceIndex === 0}
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9"
-                aria-label="Câu trước"
-              >
-                <ChevronLeft className="h-5 w-5 stroke-[2]" />
-              </Button>
-
-              <Button
-                onClick={isPlaying && !isPaused ? onPause : onPlay}
-                disabled={isDisabled}
-                size="icon"
-                className="h-10 w-10 rounded-full"
-                aria-label={isPlaying && !isPaused ? 'Tạm dừng' : 'Phát'}
-              >
-                {isPlaying && !isPaused ? (
-                  <Pause className="h-5 w-5 stroke-[2.5]" fill="currentColor" />
-                ) : (
-                  <Play className="h-5 w-5 stroke-[2.5] ml-0.5" fill="currentColor" />
-                )}
-              </Button>
-
-              <Button
-                onClick={onNext}
-                disabled={isDisabled || currentSentenceIndex >= totalSentences - 1}
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9"
-                aria-label="Câu tiếp"
-              >
-                <ChevronRight className="h-5 w-5 stroke-[2]" />
-              </Button>
-
-              {/* Progress indicator */}
-              <span className="text-xs text-muted-foreground ml-2 whitespace-nowrap">
-                {currentSentenceIndex + 1} / {totalSentences}
-              </span>
-            </div>
-
-            {/* Right: Settings (Rate and Voice) */}
+            {/* Left: Settings (Rate) */}
             <div className="flex items-center gap-2">
               {/* Rate Dropdown - Opens upward */}
               <DropdownMenu>
@@ -192,7 +156,54 @@ export default function TtsControls({
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
+            </div>
 
+            {/* Center: Play controls */}
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={onPrevChapter}
+                disabled={isDisabled || currentChapterIndex === 0}
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                aria-label="Chương trước"
+              >
+                <ChevronLeft className="h-5 w-5 stroke-[2]" />
+              </Button>
+
+              <Button
+                onClick={isPlaying && !isPaused ? onPause : onPlay}
+                disabled={isDisabled}
+                size="icon"
+                className="h-10 w-10 rounded-full"
+                aria-label={isPlaying && !isPaused ? 'Tạm dừng' : 'Phát'}
+              >
+                {isPlaying && !isPaused ? (
+                  <Pause className="h-5 w-5 stroke-[2.5]" fill="currentColor" />
+                ) : (
+                  <Play className="h-5 w-5 stroke-[2.5] ml-0.5" fill="currentColor" />
+                )}
+              </Button>
+
+              <Button
+                onClick={onNextChapter}
+                disabled={isDisabled || currentChapterIndex >= totalChapters - 1}
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                aria-label="Chương tiếp"
+              >
+                <ChevronRight className="h-5 w-5 stroke-[2]" />
+              </Button>
+
+              {/* Progress indicator */}
+              <span className="text-xs text-muted-foreground ml-2 whitespace-nowrap">
+                {currentChapterIndex + 1} / {totalChapters}
+              </span>
+            </div>
+
+            {/* Right: Settings (Voice) */}
+            <div className="flex items-center gap-2">
               {/* Voice Select with Search */}
               {voicesLoading ? (
                 <span className="text-xs text-muted-foreground px-2">Đang tải...</span>
