@@ -39,6 +39,20 @@ export function extractHtmlFromSection(section: any): string {
 }
 
 /**
+ * Clean quote spacing in text content
+ * Also removes smart quotes completely
+ */
+function cleanQuoteSpacing(text: string): string {
+  return text
+    .replaceAll(' “', '"')// Remove ALL smart quotes completely (not just spaces around them
+    // Then clean regular quote spacing
+    .replace(/\s+”/g, '"') 
+    .replace(/"\s+/g, '"')
+    .replace(/\s+'/g, "'")
+    .replace(/'\s+/g, "'")
+}
+
+/**
  * Build sentences array and processed HTML from raw HTML content
  */
 export function buildSentencesAndHtml(htmlContent: string): {
@@ -46,9 +60,14 @@ export function buildSentencesAndHtml(htmlContent: string): {
   html: string
 } {
   const extracted: Sentence[] = []
+  // Clean quote spacing in HTML before processing
+  const cleanedHtml = htmlContent.replace(/>([^<]+)</g, (_, content) => {
+    return `>${cleanQuoteSpacing(content)}<`
+  })
+
   try {
     const parser = new DOMParser()
-    const doc = parser.parseFromString(htmlContent, 'text/html')
+    const doc = parser.parseFromString(cleanedHtml, 'text/html')
 
     // Remove all anchor tags to prevent navigation to non-existent links
     // This fixes 404 errors when clicking on table of contents links in EPUB content
@@ -80,18 +99,20 @@ export function buildSentencesAndHtml(htmlContent: string): {
               return match ? parseInt(match[1], 10) : -1
             })()
         const markerId = span.getAttribute('id') || ''
-        const text = span.textContent || (span as HTMLElement).innerText || ''
-        if (markerId && text.trim() && sentenceIndex >= 0) {
-          extracted.push({ sentenceIndex, text: text.trim(), markerId })
+        let text = span.textContent || (span as HTMLElement).innerText || ''
+        text = text.trim()
+        text = cleanQuoteSpacing(text)
+        if (markerId && text && sentenceIndex >= 0) {
+          extracted.push({ sentenceIndex, text, markerId })
         }
       })
       extracted.sort((a, b) => a.sentenceIndex - b.sentenceIndex)
-      return { sentences: extracted, html: htmlContent }
+      return { sentences: extracted, html: cleanedHtml }
     }
 
     // 2) Nếu EPUB thô không có span, tự chia câu & thêm span vào DOM
     const root = (doc.body || doc.documentElement) as HTMLElement | null
-    if (!root) return { sentences: [], html: htmlContent }
+    if (!root) return { sentences: [], html: cleanedHtml }
 
     const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT)
     const textNodes: Text[] = []
@@ -111,7 +132,8 @@ export function buildSentencesAndHtml(htmlContent: string): {
       const parts: string[] = []
       let match: RegExpExecArray | null
       while ((match = sentenceRegex.exec(text)) !== null) {
-        const s = match[1].trim()
+        let s = match[1].trim()
+        s = cleanQuoteSpacing(s)
         if (s) parts.push(s)
       }
       if (parts.length === 0) return
@@ -145,7 +167,7 @@ export function buildSentencesAndHtml(htmlContent: string): {
     }
   } catch (err) {
     console.error('[v2 ExtractSentences] Error extracting sentences:', err)
-    return { sentences: [], html: htmlContent }
+    return { sentences: [], html: cleanedHtml }
   }
 }
 

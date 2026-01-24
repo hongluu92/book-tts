@@ -1,5 +1,21 @@
 import { TtsEngine, TtsOptions } from './types'
 
+/**
+ * Clean text before TTS speaks it
+ * Removes smart quotes and trims spacing issues
+ */
+function cleanTextForTts(text: string): string {
+  return text
+    // Remove all smart quotes completely
+    .replace(/["""'''']/g, '')
+    // Clean up spacing around remaining quotes
+    .replace(/\s+"/g, '"')
+    .replace(/"\s+/g, '"')
+    .replace(/\s+'/g, "'")
+    .replace(/'\s+/g, "'")
+    .trim()
+}
+
 export class BrowserSpeechEngine implements TtsEngine {
   private utterance: SpeechSynthesisUtterance | null = null
   private voices: SpeechSynthesisVoice[] = []
@@ -67,8 +83,11 @@ export class BrowserSpeechEngine implements TtsEngine {
 
     this.cancel()
 
+    // Clean text before speaking
+    const cleanedText = cleanTextForTts(text)
+
     return new Promise((resolve, reject) => {
-      const utterance = new SpeechSynthesisUtterance(text)
+      const utterance = new SpeechSynthesisUtterance(cleanedText)
       
       utterance.voice = options.voice || null
       utterance.rate = options.rate ?? 1.0
