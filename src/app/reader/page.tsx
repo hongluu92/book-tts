@@ -172,6 +172,8 @@ function ReaderContent() {
 
   // Use ref to store stop function to avoid circular dependency
   const stopRef = useRef<(() => void) | null>(null)
+  // Track if we should auto-play after chapter load
+  const autoPlayNextChapterRef = useRef(false)
 
   const {
     loadChapter,
@@ -225,12 +227,44 @@ function ReaderContent() {
       }
     },
     onProgress: () => {},
+    onChapterEnd: () => {
+      console.log('[onChapterEnd] Triggered, currentChapter:', currentChapterIndex, 'total:', chapters.length)
+      // Auto-advance to next chapter when current chapter finishes
+      if (currentChapterIndex < chapters.length - 1) {
+        const nextIndex = currentChapterIndex + 1
+        console.log('[onChapterEnd] Loading next chapter:', nextIndex)
+        // Set flag to auto-play after chapter loads
+        autoPlayNextChapterRef.current = true
+        setCurrentChapterIndex(nextIndex)
+        loadChapter(nextIndex)  // loadChapter will call stop() internally
+      } else {
+        console.log('[onChapterEnd] Last chapter, not advancing')
+      }
+    },
   })
 
   // Update stop ref after useTts is initialized
   useEffect(() => {
     stopRef.current = stop
   }, [stop])
+
+  // Auto-play after chapter loads when onChapterEnd was triggered
+  useEffect(() => {
+    console.log('[Auto-play] Effect running:', {
+      flag: autoPlayNextChapterRef.current,
+      loading: loadingSentences,
+      sentencesCount: sentences.length,
+      chapterIndex: currentChapterIndex
+    })
+    // Only auto-play if flag is set, chapter is done loading, and sentences are available
+    if (autoPlayNextChapterRef.current && !loadingSentences && sentences.length > 0) {
+      console.log('[Auto-play] Conditions met, calling playFrom(0) directly')
+      // Reset flag first to prevent double-play
+      autoPlayNextChapterRef.current = false
+      // Use playFrom(0) to explicitly start from beginning of new chapter
+      playFrom(0)
+    }
+  }, [loadingSentences, sentences.length, playFrom])
 
   const currentMarkerId = sentences[currentSentenceIndex]?.markerId || null
   // Always highlight the current sentence, not just when playing
