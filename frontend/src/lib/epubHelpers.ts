@@ -50,6 +50,20 @@ export function buildSentencesAndHtml(htmlContent: string): {
     const parser = new DOMParser()
     const doc = parser.parseFromString(htmlContent, 'text/html')
 
+    // Remove all anchor tags to prevent navigation to non-existent links
+    // This fixes 404 errors when clicking on table of contents links in EPUB content
+    const anchors = doc.querySelectorAll('a[href]')
+    anchors.forEach((anchor) => {
+      const text = anchor.textContent
+      if (text) {
+        const span = doc.createElement('span')
+        span.textContent = text
+        anchor.replaceWith(span)
+      } else {
+        anchor.remove()
+      }
+    })
+
     // 1) Nếu đã có span đánh dấu câu (như v1) thì chỉ cần đọc lại
     let sentenceSpans = doc.querySelectorAll('span[data-sent][id]')
     if (sentenceSpans.length === 0) {
