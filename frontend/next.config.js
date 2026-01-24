@@ -144,9 +144,21 @@ const withPWA = require('next-pwa')({
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Static export for GitHub Pages
+  output: 'export',
+  // Base path for GitHub Pages: /repo-name/
+  basePath: '/book-tts',
+  // Asset prefix for proper loading
+  assetPrefix: '/book-tts',
+  // Disable image optimization for static export
+  images: {
+    unoptimized: true,
+  },
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api',
   },
+  // PWA needs trailingSlash for proper routing
+  trailingSlash: true,
 }
 
 module.exports = withPWA(nextConfig)

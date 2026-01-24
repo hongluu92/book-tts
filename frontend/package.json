@@ -5,9 +5,11 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "export": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:epub-html": "node scripts/check-epub-html.cjs"
+    "test:epub-html": "node scripts/check-epub-html.cjs",
+    "serve": "npx serve@latest out -l 3000"
   },
   "dependencies": {
     "@heroicons/react": "^2.1.1",
