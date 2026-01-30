@@ -184,17 +184,13 @@ export function useTts(options: UseTtsOptions) {
     }
 
     if (isPaused) {
-      const isWindows = typeof window !== 'undefined' && navigator.userAgent.includes('Windows')
-      if (isWindows) {
-        console.log('[useTts] Windows detected: using cancel+play instead of resume')
-        engineRef.current.cancel()
-        setIsPaused(false)
-        isPlayingRef.current = true
-        playSentence(currentSentenceIndex)
-      } else {
-        engineRef.current.resume()
-        setIsPaused(false)
-      }
+      // Mobile browsers (and some desktop ones) are unreliable with resume()
+      // So we always cancel and restart the current sentence which is consistent everywhere
+      console.log('[useTts] Resuming by restarting current sentence')
+      engineRef.current.cancel()
+      setIsPaused(false)
+      isPlayingRef.current = true
+      playSentence(currentSentenceIndex)
     } else {
       isPlayingRef.current = true
       playSentence(currentSentenceIndex)
