@@ -27,6 +27,7 @@ export function useTts(options: UseTtsOptions) {
   const isPlayingRef = useRef(false)
   const prevRateRef = useRef(1.0)
   const isRestartingRef = useRef(false)
+  const isResumingRef = useRef(false)
 
   const loadAndSelectVoice = useCallback(async () => {
     if (!engineRef.current || !engineRef.current.isSupported()) {
@@ -130,14 +131,15 @@ export function useTts(options: UseTtsOptions) {
           setIsPaused(false)
           isPlayingRef.current = true
           isRestartingRef.current = false
+          isResumingRef.current = false
           onSentenceStart?.(sentence)
         },
         onEnd: () => {
-          onSentenceEnd?.(sentence)
-
-          if (isRestartingRef.current) {
+          if (isResumingRef.current || isRestartingRef.current) {
             return
           }
+
+          onSentenceEnd?.(sentence)
 
           // Auto-play next sentence if still playing
           if (isPlayingRef.current && index < sentences.length - 1) {
@@ -153,6 +155,8 @@ export function useTts(options: UseTtsOptions) {
           }
         },
         onError: (error) => {
+          if (isResumingRef.current) return
+
           if (!error.message.includes('interrupted') && !error.message.includes('canceled')) {
             console.error('TTS error:', error)
           }
@@ -191,10 +195,15 @@ export function useTts(options: UseTtsOptions) {
       // Mobile browsers (and some desktop ones) are unreliable with resume()
       // So we always cancel and restart the current sentence which is consistent everywhere
       console.log('[useTts] Resuming by restarting current sentence')
+      isResumingRef.current = true
       engineRef.current.cancel()
-      setIsPaused(false)
-      isPlayingRef.current = true
-      playSentence(currentSentenceIndex)
+
+      // Short delay to ensure cancel processed
+      setTimeout(() => {
+        setIsPaused(false)
+        isPlayingRef.current = true
+        playSentence(currentSentenceIndex)
+      }, 10)
     } else {
       isPlayingRef.current = true
       playSentence(currentSentenceIndex)
@@ -219,9 +228,11 @@ export function useTts(options: UseTtsOptions) {
 
   const seek = useCallback(
     (index: number) => {
+      const wasPlaying = isPlayingRef.current
       stop()
       setCurrentSentenceIndex(index)
-      if (isPlayingRef.current) {
+      if (wasPlaying) {
+        isPlayingRef.current = true
         playSentence(index)
       }
     },
