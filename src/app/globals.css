@@ -65,14 +65,22 @@
 }
 
 @layer utilities {
-  .tts-active {
-    background-color: var(--highlight-bg);
-    border-left: 4px solid var(--highlight-border);
-    padding-left: 0.25rem;
-    padding-right: 0.25rem;
-    border-radius: 0.125rem;
-    transition: background-color 200ms ease, border-color 200ms ease;
+  .sentence-highlighted {
+    background-color: rgba(251, 191, 36, 0.2);
+    border-bottom: 2px solid #fbbf24;
+    padding-bottom: 2px;
   }
+
+  .dark .sentence-highlighted {
+    background-color: rgba(251, 191, 36, 0.15);
+    border-bottom: 2px solid #f59e0b;
+  }
+}
+
+/* TTS Active highlight - outside layer to ensure it applies */
+.tts-active {
+  background-color: var(--highlight-bg) !important;
+  transition: background-color 200ms ease, border-color 200ms ease !important;
 }
 
 /* iOS Safe Area */
@@ -80,7 +88,7 @@
   .safe-area-bottom {
     padding-bottom: max(1rem, env(safe-area-inset-bottom));
   }
-  
+
   .safe-area-top {
     padding-top: max(1rem, env(safe-area-inset-top));
   }

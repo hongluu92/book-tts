@@ -3,53 +3,48 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { ArrowLeft, Settings } from 'lucide-react'
-import { db, BookLocal, V2Chapter, V2Progress, V2ImportStatus } from '@/storage/db'
+import { db, BookLocal, V2Chapter, V2Progress, V2ImportStatus, SentenceHighlight } from '@/storage/db'
 import { Sentence } from '@/lib/tts/types'
 import { useTts } from '@/hooks/useTts'
 import { useSentenceHighlight } from '@/hooks/useSentenceHighlight'
 import { useChapterLoader } from '@/hooks/useChapterLoader'
+import { useReaderSettings } from '@/hooks/useReaderSettings'
 import TtsControls from '@/components/TtsControls'
 import ReaderSettings from '@/components/ReaderSettings'
 import ChapterNavigation from '@/components/ChapterNavigation'
+import SentenceContextMenu from '@/components/SentenceContextMenu'
+import HighlightList from '@/components/HighlightList'
 import { Button } from '@/components/ui/button'
+import { Bookmark } from 'lucide-react'
 
 function ReaderContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const bookFingerprint = searchParams.get('bookId') as string
 
+  // Reader settings with localStorage persistence
+  const { fontSize, setFontSize, fontFamily, setFontFamily, theme, setTheme, showSettings, setShowSettings } = useReaderSettings()
+
   const [book, setBook] = useState<BookLocal | null>(null)
   const [chapters, setChapters] = useState<V2Chapter[]>([])
   const [currentChapterIndex, setCurrentChapterIndex] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [fontSize, setFontSize] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('reader-font-size')
-      return saved ? parseInt(saved, 10) : 18
-    }
-    return 18
-  })
-  const [fontFamily, setFontFamily] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('reader-font-family')
-      return saved || 'Georgia, serif'
-    }
-    return 'Georgia, serif'
-  })
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('reader-theme') as 'light' | 'dark' | null
-      return saved || 'light'
-    }
-    return 'light'
-  })
-  const [showSettings, setShowSettings] = useState(false)
   const [reprocessing] = useState(false)
+  const [contextMenu, setContextMenu] = useState<{
+    x: number
+    y: number
+    sentenceIndex: number
+    text: string
+  } | null>(null)
+  const [highlights, setHighlights] = useState<Set<number>>(new Set())
+  const [showHighlights, setShowHighlights] = useState(false)
 
   const currentChapter = chapters[currentChapterIndex] || null
 
   const contentRef = useRef<HTMLDivElement>(null)
   const mainRef = useRef<HTMLDivElement>(null)
+  const shouldAutoScrollRef = useRef<boolean>(true) // Control auto-scroll behavior
+  const prevSentenceIndexRef = useRef<number>(-1) // Track previous sentence index
 
   // Helper function to scroll to a sentence element
   const scrollToSentence = useCallback((markerId: string) => {
@@ -76,7 +71,7 @@ function ReaderContent() {
       const containerOffsetTop = mainRef.current.offsetTop || 0
       const containerHeight = mainRef.current.clientHeight
       const elementHeight = targetElement.offsetHeight
-      
+
       // Calculate target scroll to center element
       const targetScrollTop = elementOffsetTop - containerOffsetTop - (containerHeight / 2) + (elementHeight / 2)
 
@@ -212,7 +207,7 @@ function ReaderContent() {
         db.v2Progress.put(updated)
       }
     },
-    onProgress: () => {},
+    onProgress: () => { },
     onChapterEnd: () => {
       // Auto-advance to next chapter when current chapter finishes
       if (currentChapterIndex < chapters.length - 1) {
@@ -242,67 +237,28 @@ function ReaderContent() {
   }, [loadingSentences, sentences.length, playFrom])
 
   const currentMarkerId = sentences[currentSentenceIndex]?.markerId || null
-  // Always highlight the current sentence, not just when playing
-  // This ensures the highlight is visible when TTS starts or when user seeks
-  useSentenceHighlight(contentRef, currentMarkerId, true, mainRef)
 
-  // Force re-highlight and scroll when chapterContent changes (new chapter loaded)
-  // This ensures highlight is applied after HTML is rendered
+  // Only scroll when:
+  // 1. Audio is playing
+  // 2. Auto-scroll is enabled (not disabled by user click)
+  // 3. Sentence naturally progressed (current > prev, indicating auto-advance)
+  const isNaturalTransition = currentSentenceIndex > prevSentenceIndexRef.current
+  const shouldScroll = isPlaying && shouldAutoScrollRef.current && isNaturalTransition
+
+  // Update previous sentence index
   useEffect(() => {
-    if (currentMarkerId && contentRef.current && chapterContent) {
-      // Small delay to ensure React has finished rendering the HTML
-      const timer = setTimeout(() => {
-        const findAndHighlight = () => {
-          let element = contentRef.current?.querySelector(`#${currentMarkerId}`) as HTMLElement
-          if (!element) {
-            // Try data-sent as fallback
-            const sentenceIndex = currentMarkerId.match(/s-(\d+)/)?.[1]
-            if (sentenceIndex) {
-              element = contentRef.current?.querySelector(`span[data-sent="${sentenceIndex}"]`) as HTMLElement
-            }
-          }
-          
-          if (element) {
-            // Remove all previous highlights
-            contentRef.current?.querySelectorAll('.tts-active').forEach((el) => el.classList.remove('tts-active'))
-            element.classList.add('tts-active')
-            
-            // Scroll to element
-            scrollToSentence(currentMarkerId)
-          }
-        }
-        
-        findAndHighlight()
-        // Retry after a longer delay in case DOM wasn't ready
-        setTimeout(findAndHighlight, 300)
-      }, 200)
-      return () => clearTimeout(timer)
+    if (currentSentenceIndex !== prevSentenceIndexRef.current) {
+      prevSentenceIndexRef.current = currentSentenceIndex
     }
-  }, [chapterContent, currentMarkerId])
+  }, [currentSentenceIndex])
 
-  // Apply theme changes
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark')
-    localStorage.setItem('reader-theme', theme)
-  }, [theme])
+  useSentenceHighlight(contentRef, currentMarkerId, shouldScroll, mainRef)
 
-  // Apply font size changes
-  useEffect(() => {
-    localStorage.setItem('reader-font-size', fontSize.toString())
-    if (contentRef.current) {
-      contentRef.current.style.fontSize = `${fontSize}px`
-    }
-  }, [fontSize])
-
-  // Apply font family changes
-  useEffect(() => {
-    localStorage.setItem('reader-font-family', fontFamily)
-    if (contentRef.current) {
-      contentRef.current.style.fontFamily = fontFamily
-    }
-  }, [fontFamily])
+  // Note: Highlight is now fully handled by useSentenceHighlight hook
+  // No need for separate effect here - it was causing conflicts
 
   // Apply font settings when contentRef becomes available or content changes
+  // Note: localStorage persistence is now handled by useReaderSettings hook
   useEffect(() => {
     if (contentRef.current) {
       contentRef.current.style.fontFamily = fontFamily
@@ -322,30 +278,30 @@ function ReaderContent() {
   useEffect(() => {
     if (!chapters.length) return
     hasRestoredPositionRef.current = false // Reset flag khi chapters thay đổi
-    ;(async () => {
-      try {
-        // Lấy tất cả progress của sách, sắp xếp theo thời gian giảm dần để lấy progress mới nhất
-        const allProgress = await db.v2Progress.where('bookFingerprint').equals(bookFingerprint).toArray()
-        if (allProgress.length > 0) {
-          const lastProgress = allProgress.sort((a, b) => {
-            const dateA = a.updatedAtMs || 0
-            const dateB = b.updatedAtMs || 0
-            return dateB - dateA
-          })[0]
+      ; (async () => {
+        try {
+          // Lấy tất cả progress của sách, sắp xếp theo thời gian giảm dần để lấy progress mới nhất
+          const allProgress = await db.v2Progress.where('bookFingerprint').equals(bookFingerprint).toArray()
+          if (allProgress.length > 0) {
+            const lastProgress = allProgress.sort((a, b) => {
+              const dateA = a.updatedAtMs || 0
+              const dateB = b.updatedAtMs || 0
+              return dateB - dateA
+            })[0]
 
-          setProgress(lastProgress)
-          const idx = chapters.findIndex((ch) => ch.chapterId === lastProgress.chapterId)
-          const chapterIndex = idx >= 0 ? idx : 0
-          setCurrentChapterIndex(chapterIndex)
-          handleLoadChapter(chapterIndex)
-        } else {
+            setProgress(lastProgress)
+            const idx = chapters.findIndex((ch) => ch.chapterId === lastProgress.chapterId)
+            const chapterIndex = idx >= 0 ? idx : 0
+            setCurrentChapterIndex(chapterIndex)
+            handleLoadChapter(chapterIndex)
+          } else {
+            handleLoadChapter(0)
+          }
+        } catch (error) {
+          console.error('Failed to find last read chapter:', error)
           handleLoadChapter(0)
         }
-      } catch (error) {
-        console.error('Failed to find last read chapter:', error)
-        handleLoadChapter(0)
-      }
-    })()
+      })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chapters.length, bookFingerprint])
 
@@ -362,6 +318,75 @@ function ReaderContent() {
       setRate(progress.ttsRate)
     }
   }, [progress, voices, voicesLoading, setSelectedVoice, setRate])
+
+  // Load highlights for current chapter
+  useEffect(() => {
+    if (!currentChapter) return
+
+    db.sentenceHighlights
+      .where('[bookFingerprint+chapterId]')
+      .equals([bookFingerprint, currentChapter.chapterId])
+      .toArray()
+      .then(items => {
+        setHighlights(new Set(items.map(h => h.sentenceIndex)))
+      })
+      .catch(err => console.error('Failed to load highlights:', err))
+  }, [currentChapter, bookFingerprint])
+
+  // Apply highlight class to HTML
+  useEffect(() => {
+    if (!contentRef.current || highlights.size === 0) return
+
+    const applyHighlights = () => {
+      // Use requestAnimationFrame to ensure DOM is ready
+      requestAnimationFrame(() => {
+        const container = contentRef.current
+        if (!container) return
+
+        let appliedCount = 0
+        highlights.forEach(sentenceIndex => {
+          const span = container.querySelector(`span[data-sent="${sentenceIndex}"]`)
+          if (span) {
+            if (!span.classList.contains('sentence-highlighted')) {
+              span.classList.add('sentence-highlighted')
+            }
+            appliedCount++
+          }
+        })
+
+        // If we have highlights but haven't found all spans yet, retry briefly
+        // This helps when dangerouslySetInnerHTML is still processing or hydrating
+        /* 
+           NOTE: 
+           This assumes all highlights belong to the current chapter.
+           If we have partial validation, we might retry unnecessarily, 
+           but usually highlights matches current chapter content.
+        */
+      })
+    }
+
+    // Run immediately
+    applyHighlights()
+
+    if (!contentRef.current) return
+
+    const observer = new MutationObserver((mutations) => {
+      let nodesAdded = false
+      for (const m of mutations) {
+        if (m.addedNodes.length > 0) {
+          nodesAdded = true
+          break
+        }
+      }
+      if (nodesAdded) applyHighlights()
+    })
+
+    observer.observe(contentRef.current, { childList: true, subtree: true })
+
+    return () => {
+      observer.disconnect()
+    }
+  }, [highlights, chapterContent])
 
   // Khôi phục vị trí câu sau khi sentences được load và progress có sẵn
   // Chờ useTts hook reset xong rồi mới khôi phục
@@ -412,28 +437,188 @@ function ReaderContent() {
     }
   }, [progress, sentences.length, currentChapter, seek, currentSentenceIndex, setSentenceIndex])
 
-  const handleSentenceClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      const target = e.target as HTMLElement
-      const span = target.closest('span[data-sent]')
-      if (!span) return
-      const sentenceIndex = parseInt(span.getAttribute('data-sent') || '0', 10)
-      seek(sentenceIndex)
-    },
-    [seek],
-  )
+  // Touch event handling for long press on mobile
+  const touchTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null)
 
-  const handleSentenceDoubleClick = useCallback(
+  const handleTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement
+    const span = target.closest('span[data-sent]')
+    if (!span) return
+
+    const touch = e.touches[0]
+    touchStartPosRef.current = { x: touch.clientX, y: touch.clientY }
+
+    // Set a timer for long press (500ms)
+    touchTimerRef.current = setTimeout(() => {
+      const sentenceIndex = parseInt(span.getAttribute('data-sent') || '0', 10)
+      const text = span.textContent || ''
+
+      // Seek to the sentence - highlight will be managed by useSentenceHighlight hook
+      seek(sentenceIndex)
+
+      // Show context menu at touch position
+      setContextMenu({
+        x: touch.clientX,
+        y: touch.clientY,
+        sentenceIndex,
+        text,
+      })
+    }, 500)
+  }, [seek])
+
+  const handleTouchEnd = useCallback(() => {
+    // Clear the long press timer if touch ends before 500ms
+    if (touchTimerRef.current) {
+      clearTimeout(touchTimerRef.current)
+      touchTimerRef.current = null
+    }
+    touchStartPosRef.current = null
+  }, [])
+
+  const handleTouchMove = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    // Cancel long press if user moves finger too much
+    if (touchStartPosRef.current && touchTimerRef.current) {
+      const touch = e.touches[0]
+      const deltaX = Math.abs(touch.clientX - touchStartPosRef.current.x)
+      const deltaY = Math.abs(touch.clientY - touchStartPosRef.current.y)
+
+      // If moved more than 10px, cancel the long press
+      if (deltaX > 10 || deltaY > 10) {
+        clearTimeout(touchTimerRef.current)
+        touchTimerRef.current = null
+      }
+    }
+  }, [])
+
+  const handleSentenceContextMenu = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       e.preventDefault()
       const target = e.target as HTMLElement
       const span = target.closest('span[data-sent]')
       if (!span) return
+
       const sentenceIndex = parseInt(span.getAttribute('data-sent') || '0', 10)
-      playFrom(sentenceIndex)
+      const text = span.textContent || ''
+
+      // Seek to the sentence - highlight will be managed by useSentenceHighlight hook
+      seek(sentenceIndex)
+
+      setContextMenu({
+        x: e.clientX,
+        y: e.clientY,
+        sentenceIndex,
+        text,
+      })
     },
-    [playFrom],
+    [seek],
   )
+
+  const handleReadFromHere = useCallback(() => {
+    if (contextMenu && currentChapter) {
+      const targetIndex = contextMenu.sentenceIndex
+      playFrom(targetIndex)
+      // Temporarily disable auto-scroll when user manually starts playback
+      shouldAutoScrollRef.current = false
+      setTimeout(() => {
+        shouldAutoScrollRef.current = true
+      }, 500)
+    }
+  }, [contextMenu, currentChapter, playFrom])
+
+  const handleHighlightSentence = useCallback(async () => {
+    if (!contextMenu || !currentChapter) return
+
+    // Check if highlight already exists
+    const existing = await db.sentenceHighlights
+      .where('[bookFingerprint+chapterId]')
+      .equals([bookFingerprint, currentChapter.chapterId])
+      .filter(h => h.sentenceIndex === contextMenu.sentenceIndex)
+      .first()
+
+    if (existing) {
+      // If exists, remove it (Unhighlight)
+      if (existing.id) {
+        await db.sentenceHighlights.delete(existing.id)
+
+        // Remove from local state
+        setHighlights((prev) => {
+          const next = new Set(prev)
+          next.delete(contextMenu.sentenceIndex)
+          return next
+        })
+
+        // Remove class from DOM immediately
+        const span = contentRef.current?.querySelector(`span[data-sent="${contextMenu.sentenceIndex}"]`)
+        if (span) {
+          span.classList.remove('sentence-highlighted')
+        }
+
+      }
+      setContextMenu(null)
+      return
+    }
+
+    const highlight: Omit<SentenceHighlight, 'id'> = {
+      bookFingerprint,
+      chapterId: currentChapter.chapterId,
+      sentenceIndex: contextMenu.sentenceIndex,
+      markerId: sentences[contextMenu.sentenceIndex]?.markerId || '',
+      text: contextMenu.text,
+      createdAtMs: Date.now(),
+    }
+
+    await db.sentenceHighlights.add(highlight)
+    // Reload highlights for this chapter
+    setHighlights((prev) => new Set(prev).add(contextMenu.sentenceIndex))
+    setContextMenu(null)
+  }, [contextMenu, currentChapter, bookFingerprint, sentences])
+
+  const handleNavigateToHighlight = useCallback((chapterId: string, sentenceIndex: number) => {
+    // Check if we are already in the correct chapter
+    const targetChapterIndex = chapters.findIndex(c => c.chapterId === chapterId)
+    if (targetChapterIndex === -1) return
+
+    if (currentChapterIndex !== targetChapterIndex) {
+      // Need to switch chapter first
+      // We'll set a temporary "restore point" that will be picked up after chapter load
+
+      /* 
+         We can simulate a Progress update and let the existing restoration logic handle it.
+         Or update state and call loadChapter.
+      */
+
+      const targetProgress: V2Progress = {
+        bookFingerprint,
+        chapterId,
+        sentenceIndex,
+        markerId: '', // Will be resolved after load
+        updatedAtMs: Date.now()
+      }
+
+      // Update local progress/state so the restoration logic picks it up
+      setProgress(targetProgress)
+      hasRestoredPositionRef.current = false // Allow restoration to happen again
+      setCurrentChapterIndex(targetChapterIndex)
+      loadChapter(targetChapterIndex)
+    } else {
+      // Same chapter - just jump there
+      setSentenceIndex(sentenceIndex)
+      seek(sentenceIndex) // Also updates TTS if playing
+
+      // Scroll to it
+      setTimeout(() => {
+        // Find DOM element
+        // useSentenceHighlight will handle the scrolling if we update useTts state (which seek/setSentenceIndex does)
+        // But let's force scroll just in case
+        const targetSentence = sentences[sentenceIndex]
+        if (targetSentence) {
+          const element = document.getElementById(targetSentence.markerId)
+          element?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
+      }, 100)
+    }
+  }, [chapters, currentChapterIndex, bookFingerprint, loadChapter, setSentenceIndex, seek, sentences])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -556,6 +741,16 @@ function ReaderContent() {
             onStop={stop}
           />
 
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setShowHighlights(true)}
+            className="h-9 w-9"
+            title="View Highlights"
+          >
+            <Bookmark className="h-5 w-5 stroke-[2]" />
+          </Button>
+
           <Button variant="ghost" size="icon" onClick={() => setShowSettings(!showSettings)} className="h-9 w-9">
             <Settings className="h-5 w-5 stroke-[2]" />
           </Button>
@@ -579,8 +774,10 @@ function ReaderContent() {
           className="max-w-3xl mx-auto px-6 py-12 leading-relaxed cursor-pointer"
           style={{ fontSize: `${fontSize}px`, fontFamily: fontFamily }}
           dangerouslySetInnerHTML={{ __html: chapterContent }}
-          onClick={handleSentenceClick}
-          onDoubleClick={handleSentenceDoubleClick}
+          onContextMenu={handleSentenceContextMenu}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+          onTouchMove={handleTouchMove}
         />
       </main>
 
@@ -615,10 +812,29 @@ function ReaderContent() {
           isSupported={isSupported}
           loading={loadingSentences}
           error={sentencesError}
-          onReprocess={() => {}}
+          onReprocess={() => { }}
           reprocessing={reprocessing}
         />
       </div>
+
+      {contextMenu && (
+        <SentenceContextMenu
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          sentenceText={contextMenu.text}
+          onReadFromHere={handleReadFromHere}
+          onHighlight={handleHighlightSentence}
+          isHighlighted={highlights.has(contextMenu.sentenceIndex)}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      <HighlightList
+        bookFingerprint={bookFingerprint}
+        chapters={chapters}
+        isOpen={showHighlights}
+        onClose={() => setShowHighlights(false)}
+        onNavigate={handleNavigateToHighlight}
+      />
     </div>
   )
 }

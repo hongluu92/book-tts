@@ -11,6 +11,7 @@ export function useSentenceHighlight(
   const elementRef = useRef<HTMLElement | null>(null)
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const prevMarkerIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     // Clear any pending timeouts
@@ -24,14 +25,26 @@ export function useSentenceHighlight(
     }
 
     if (!markerId || !contentRef.current) {
-      elementRef.current = null
+      // Remove highlight from previous element if exists ONLY when markerId becomes null
+      if (elementRef.current && markerId === null) {
+        elementRef.current.classList.remove('tts-active')
+        elementRef.current = null
+      }
+      prevMarkerIdRef.current = markerId
       return
     }
 
-    // Remove previous highlights first
-    const previousActive = contentRef.current.querySelectorAll('.tts-active')
-    previousActive.forEach((el) => el.classList.remove('tts-active'))
-    elementRef.current = null
+    // Remove ALL previous highlights when markerId actually changes
+    // This preserves highlight when only 'active' state changes (pause/stop)
+    if (prevMarkerIdRef.current !== markerId && contentRef.current) {
+      // Remove all previous highlights
+      const previousActive = contentRef.current.querySelectorAll('.tts-active')
+      previousActive.forEach((el) => el.classList.remove('tts-active'))
+      elementRef.current = null
+    }
+
+    // Update previous markerId
+    prevMarkerIdRef.current = markerId
 
     // Helper function to find element
     const findElement = (): HTMLElement | null => {
@@ -39,7 +52,7 @@ export function useSentenceHighlight(
 
       // Try to find element by ID
       let element = contentRef.current.querySelector(`#${markerId}`) as HTMLElement
-      
+
       // If not found, try with escaped ID (for special characters)
       if (!element) {
         try {
@@ -48,7 +61,7 @@ export function useSentenceHighlight(
           // CSS.escape might not be available in all browsers
         }
       }
-      
+
       // If still not found, try data-sent attribute
       if (!element) {
         const sentenceIndex = markerId.match(/s-(\d+)/)?.[1]
@@ -78,7 +91,7 @@ export function useSentenceHighlight(
 
     const tryFindAndHighlight = () => {
       const element = findElement()
-      
+
       if (!element) {
         if (retryCount < maxRetries) {
           retryCount++
@@ -93,11 +106,9 @@ export function useSentenceHighlight(
 
       // Element found - store reference and apply highlight
       elementRef.current = element
-      
-      // Always add highlight class when element is found and active is true
-      if (active) {
-        element.classList.add('tts-active')
-      }
+
+      // Always add highlight class when element is found
+      element.classList.add('tts-active')
 
       // Debounced scroll to element (avoid jitter)
       const scrollToElement = () => {
@@ -154,15 +165,18 @@ export function useSentenceHighlight(
         }
       }
 
-      // Windows Chrome fix: Use double requestAnimationFrame + longer delay
-      // to ensure DOM layout is fully computed before scrolling
-      scrollTimeoutRef.current = setTimeout(() => {
-        requestAnimationFrame(() => {
+      // Only scroll to element if active (playing)
+      if (active) {
+        // Windows Chrome fix: Use double requestAnimationFrame + longer delay
+        // to ensure DOM layout is fully computed before scrolling
+        scrollTimeoutRef.current = setTimeout(() => {
           requestAnimationFrame(() => {
-            scrollToElement()
+            requestAnimationFrame(() => {
+              scrollToElement()
+            })
           })
-        })
-      }, 200) // Increased from 120ms to 200ms for Windows Chrome
+        }, 200) // Increased from 120ms to 200ms for Windows Chrome
+      }
     }
 
     // Start the find and highlight process after a small delay to ensure DOM is ready
@@ -171,7 +185,8 @@ export function useSentenceHighlight(
       setTimeout(tryFindAndHighlight, 50)
     })
 
-    // Cleanup: Remove highlight and clear timeouts
+    // Cleanup: Only clear timeouts, don't remove highlight
+    // Highlight will be removed only when markerId changes (handled at the top of this effect)
     return () => {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
@@ -181,10 +196,8 @@ export function useSentenceHighlight(
         clearTimeout(scrollTimeoutRef.current)
         scrollTimeoutRef.current = null
       }
-      if (elementRef.current && !active) {
-        elementRef.current.classList.remove('tts-active')
-        elementRef.current = null
-      }
+      // DO NOT remove highlight in cleanup
+      // It will be removed when markerId changes to a different sentence
     }
   }, [markerId, active, contentRef, scrollContainerRef])
 }

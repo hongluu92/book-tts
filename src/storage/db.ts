@@ -62,6 +62,16 @@ export interface BookCover {
   mimeType: string
 }
 
+export interface SentenceHighlight {
+  id?: number
+  bookFingerprint: string
+  chapterId: string
+  sentenceIndex: number
+  markerId: string
+  text: string
+  createdAtMs: number
+}
+
 class EpubReaderDB extends Dexie {
   progress!: Table<Progress>
   books!: Table<BookLocal>
@@ -70,6 +80,7 @@ class EpubReaderDB extends Dexie {
   v2Chapters!: Table<V2Chapter>
   v2ImportStatus!: Table<V2ImportStatus>
   bookCovers!: Table<BookCover>
+  sentenceHighlights!: Table<SentenceHighlight>
 
   constructor() {
     super('EpubReaderDB')
@@ -113,6 +124,18 @@ class EpubReaderDB extends Dexie {
       v2Chapters: '++id, bookFingerprint, [bookFingerprint+spineIndex], chapterId',
       v2ImportStatus: 'bookFingerprint, updatedAtMs',
       bookCovers: 'bookFingerprint',
+    })
+
+    // v6: add sentenceHighlights store for user-created highlights
+    this.version(6).stores({
+      progress: '++id, bookId, chapterId, [bookId+chapterId], updatedAt',
+      books: 'bookFingerprint, addedAtMs, title',
+      bookFiles: 'bookFingerprint',
+      v2Progress: '++id, bookFingerprint, [bookFingerprint+chapterId], updatedAtMs',
+      v2Chapters: '++id, bookFingerprint, [bookFingerprint+spineIndex], chapterId',
+      v2ImportStatus: 'bookFingerprint, updatedAtMs',
+      bookCovers: 'bookFingerprint',
+      sentenceHighlights: '++id, bookFingerprint, [bookFingerprint+chapterId], [bookFingerprint+chapterId+sentenceIndex], createdAtMs',
     })
   }
 }

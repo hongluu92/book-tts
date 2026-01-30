@@ -92,10 +92,6 @@
 /* Light mode */
 .tts-active {
   background-color: #FEF3C7;
-  border-left: 3px solid #FCD34D;
-  padding-left: 4px;
-  padding-right: 4px;
-  border-radius: 2px;
   transition: background-color 200ms ease;
 }
 

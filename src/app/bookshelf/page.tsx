@@ -22,24 +22,24 @@ export default function BookshelfPageV2() {
 
   const loadBooks = async () => {
     const list = await db.books.orderBy('addedAtMs').reverse().toArray()
-    
+
     // Load covers for each book
     const booksWithCovers: BookWithCover[] = await Promise.all(
       list.map(async (book) => {
         const cover = await db.bookCovers.get(book.bookFingerprint)
         let coverUrl: string | null = null
-        
+
         if (cover) {
           coverUrl = URL.createObjectURL(cover.blob)
         }
-        
+
         return {
           ...book,
           coverUrl,
         }
       })
     )
-    
+
     setBooks(booksWithCovers)
   }
 
@@ -121,7 +121,7 @@ export default function BookshelfPageV2() {
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Import your first EPUB to start reading offline.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
             {books.map((book) => (
               <div
                 key={book.bookFingerprint}
@@ -139,12 +139,12 @@ export default function BookshelfPageV2() {
                         }}
                       />
                     ) : (
-                      <BookOpen className="h-12 w-12 text-gray-400 stroke-[1.5]" />
+                      <BookOpen className="h-8 w-8 text-gray-400 stroke-[1.5]" />
                     )}
                   </div>
-                  <div className="p-3">
-                    <h3 className="font-medium text-sm text-gray-900 dark:text-white line-clamp-2">{book.title}</h3>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 line-clamp-1">{book.fileName}</p>
+                  <div className="p-2">
+                    <h3 className="font-medium text-xs text-gray-900 dark:text-white line-clamp-2">{book.title}</h3>
+                    <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 line-clamp-1">{book.fileName}</p>
                   </div>
                 </Link>
                 <button
@@ -153,10 +153,10 @@ export default function BookshelfPageV2() {
                     ev.stopPropagation()
                     setShowDeleteConfirm(book.bookFingerprint)
                   }}
-                  className="absolute top-2 right-2 p-2 bg-red-600 hover:bg-red-700 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="absolute top-1 right-1 p-1.5 bg-red-600 hover:bg-red-700 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                   title="Delete book"
                 >
-                  <Trash2 className="h-4 w-4 stroke-[2]" />
+                  <Trash2 className="h-3 w-3 stroke-[2]" />
                 </button>
               </div>
             ))}
