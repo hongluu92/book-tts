@@ -121,7 +121,7 @@ export function useTts(options: UseTtsOptions) {
 
       // Wait for React to render and apply highlight before starting speech
       // This prevents the "first read loses highlight" bug
-      await new Promise(resolve => setTimeout(resolve, 100))
+
 
       const ttsOptions: TtsOptions = {
         voice: selectedVoice || undefined,
@@ -199,11 +199,9 @@ export function useTts(options: UseTtsOptions) {
       engineRef.current.cancel()
 
       // Short delay to ensure cancel processed
-      setTimeout(() => {
-        setIsPaused(false)
-        isPlayingRef.current = true
-        playSentence(currentSentenceIndex)
-      }, 10)
+      setIsPaused(false)
+      isPlayingRef.current = true
+      playSentence(currentSentenceIndex)
     } else {
       isPlayingRef.current = true
       playSentence(currentSentenceIndex)
@@ -287,13 +285,11 @@ export function useTts(options: UseTtsOptions) {
       isRestartingRef.current = true
       engineRef.current.cancel()
 
-      setTimeout(() => {
-        if (isPlayingRef.current && currentIndex >= 0 && currentIndex < sentences.length) {
-          playSentence(currentIndex)
-        } else {
-          isRestartingRef.current = false
-        }
-      }, 50)
+      if (isPlayingRef.current && currentIndex >= 0 && currentIndex < sentences.length) {
+        playSentence(currentIndex)
+      } else {
+        isRestartingRef.current = false
+      }
     }
 
     prevRateRef.current = rate

@@ -241,9 +241,7 @@ function ReaderContent() {
   // Only scroll when:
   // 1. Audio is playing
   // 2. Auto-scroll is enabled (not disabled by user click)
-  // 3. Sentence naturally progressed (current > prev, indicating auto-advance)
-  const isNaturalTransition = currentSentenceIndex > prevSentenceIndexRef.current
-  const shouldScroll = isPlaying && shouldAutoScrollRef.current && isNaturalTransition
+  const shouldScroll = isPlaying && shouldAutoScrollRef.current
 
   // Update previous sentence index
   useEffect(() => {
