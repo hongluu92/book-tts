@@ -162,6 +162,10 @@ export function useTts(options: UseTtsOptions) {
       }
 
       try {
+        // Enforce explicit cancel before speaking to prevent duplicates/queueing
+        // This ensures "last command wins" behavior
+        engineRef.current.cancel()
+
         engineRef.current.speak(sentence.text, ttsOptions).catch((error) => {
           console.error('Failed to speak:', error)
           setIsPlaying(false)
