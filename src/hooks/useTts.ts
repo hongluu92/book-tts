@@ -118,6 +118,10 @@ export function useTts(options: UseTtsOptions) {
       setCurrentSentenceIndex(index)
       onProgress?.(index)
 
+      // Wait for React to render and apply highlight before starting speech
+      // This prevents the "first read loses highlight" bug
+      await new Promise(resolve => setTimeout(resolve, 100))
+
       const ttsOptions: TtsOptions = {
         voice: selectedVoice || undefined,
         rate,
