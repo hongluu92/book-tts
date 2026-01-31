@@ -1,5 +1,5 @@
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore'
-import { db } from './firebase'
+import { getDbInstance } from './firebase'
 import { getCurrentUser } from './firebaseAuth'
 import { SentenceBookmark } from '@/storage/db'
 
@@ -18,7 +18,11 @@ export async function loadBookmarksFromFirebase(bookFingerprint: string): Promis
     throw new Error('User not authenticated')
   }
 
-  const bookRef = doc(db, 'users', user.uid, 'books', bookFingerprint)
+  const dbInstance = getDbInstance()
+  if (!dbInstance) {
+    throw new Error('Firebase is not initialized')
+  }
+  const bookRef = doc(dbInstance, 'users', user.uid, 'books', bookFingerprint)
   const bookDoc = await getDoc(bookRef)
 
   if (!bookDoc.exists()) {
@@ -36,7 +40,11 @@ export async function loadAllBookmarksFromFirebase(): Promise<Record<string, Fir
     throw new Error('User not authenticated')
   }
 
-  const booksRef = collection(db, 'users', user.uid, 'books')
+  const dbInstance = getDbInstance()
+  if (!dbInstance) {
+    throw new Error('Firebase is not initialized')
+  }
+  const booksRef = collection(dbInstance, 'users', user.uid, 'books')
   const snapshot = await getDocs(booksRef)
   const bookmarksMap: Record<string, FirebaseBookmark[]> = {}
 
@@ -65,7 +73,11 @@ export async function syncBookmarksToFirebase(bookFingerprint: string, bookmarks
     createdAtMs: bm.createdAtMs,
   }))
 
-  const bookRef = doc(db, 'users', user.uid, 'books', bookFingerprint)
+  const dbInstance = getDbInstance()
+  if (!dbInstance) {
+    throw new Error('Firebase is not initialized')
+  }
+  const bookRef = doc(dbInstance, 'users', user.uid, 'books', bookFingerprint)
   await setDoc(bookRef, { bookmarks: firebaseBookmarks }, { merge: true })
 }
 

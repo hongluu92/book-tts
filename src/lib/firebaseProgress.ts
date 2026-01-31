@@ -1,5 +1,5 @@
 import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore'
-import { db } from './firebase'
+import { getDbInstance } from './firebase'
 import { getCurrentUser } from './firebaseAuth'
 import { V2Progress } from '@/storage/db'
 
@@ -19,7 +19,11 @@ export async function loadProgressFromFirebase(bookFingerprint: string): Promise
     throw new Error('User not authenticated')
   }
 
-  const bookRef = doc(db, 'users', user.uid, 'books', bookFingerprint)
+  const dbInstance = getDbInstance()
+  if (!dbInstance) {
+    throw new Error('Firebase is not initialized')
+  }
+  const bookRef = doc(dbInstance, 'users', user.uid, 'books', bookFingerprint)
   const bookDoc = await getDoc(bookRef)
 
   if (!bookDoc.exists()) {
@@ -37,7 +41,11 @@ export async function loadAllProgressFromFirebase(): Promise<Record<string, Fire
     throw new Error('User not authenticated')
   }
 
-  const booksRef = collection(db, 'users', user.uid, 'books')
+  const dbInstance = getDbInstance()
+  if (!dbInstance) {
+    throw new Error('Firebase is not initialized')
+  }
+  const booksRef = collection(dbInstance, 'users', user.uid, 'books')
   const snapshot = await getDocs(booksRef)
   const progressMap: Record<string, FirebaseProgress> = {}
 
@@ -58,7 +66,11 @@ export async function syncProgressToFirebase(bookFingerprint: string, progress: 
     throw new Error('User not authenticated')
   }
 
-  const bookRef = doc(db, 'users', user.uid, 'books', bookFingerprint)
+  const dbInstance = getDbInstance()
+  if (!dbInstance) {
+    throw new Error('Firebase is not initialized')
+  }
+  const bookRef = doc(dbInstance, 'users', user.uid, 'books', bookFingerprint)
   const bookDoc = await getDoc(bookRef)
 
   const firebaseProgress: FirebaseProgress = {

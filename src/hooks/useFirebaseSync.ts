@@ -8,7 +8,7 @@ import { loadAllBookmarksFromFirebase, syncBookmarksToFirebase, mergeBookmarksDa
 import { loadSettingsFromFirebase, mergeSettingsData } from '@/lib/firebaseSettings'
 import { db, BookLocal, V2Progress, SentenceBookmark } from '@/storage/db'
 import { doc, getDoc, setDoc } from 'firebase/firestore'
-import { db as firestoreDb } from '@/lib/firebase'
+import { getDbInstance } from '@/lib/firebase'
 
 export interface SyncStatus {
   hasNewData: boolean
@@ -29,7 +29,11 @@ export function useFirebaseSync() {
     }
 
     try {
-      const userRef = doc(firestoreDb, 'users', user.uid)
+      const dbInstance = getDbInstance()
+      if (!dbInstance) {
+        return { hasNewData: false, lastSyncAtMs: 0, lastLocalChangeAtMs: 0 }
+      }
+      const userRef = doc(dbInstance, 'users', user.uid)
       const userDoc = await getDoc(userRef)
 
       if (!userDoc.exists()) {
@@ -111,7 +115,11 @@ export function useFirebaseSync() {
       )
 
       // Update sync metadata
-      const userRef = doc(firestoreDb, 'users', user.uid)
+      const dbInstance = getDbInstance()
+      if (!dbInstance) {
+        return // Firebase not initialized, skip metadata update
+      }
+      const userRef = doc(dbInstance, 'users', user.uid)
       await setDoc(
         userRef,
         {

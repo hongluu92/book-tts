@@ -11,7 +11,7 @@ import {
   AuthError,
 } from 'firebase/auth'
 import { doc, setDoc, getDoc } from 'firebase/firestore'
-import { auth, db } from './firebase'
+import { getAuthInstance, getDbInstance } from './firebase'
 
 export interface AuthErrorWithCode extends Error {
   code?: string
@@ -19,27 +19,40 @@ export interface AuthErrorWithCode extends Error {
 
 // Auth state listener
 export function onAuthStateChange(callback: (user: User | null) => void) {
-  return onAuthStateChanged(auth, callback)
+  const authInstance = getAuthInstance()
+  if (!authInstance) {
+    // Firebase not initialized, return no-op unsubscribe
+    return () => {}
+  }
+  return onAuthStateChanged(authInstance, callback)
 }
 
 // Get current user
 export function getCurrentUser(): User | null {
-  return auth.currentUser
+  const authInstance = getAuthInstance()
+  return authInstance?.currentUser || null
 }
 
 // Check if user is authenticated
 export function isAuthenticated(): boolean {
-  return auth.currentUser !== null
+  const authInstance = getAuthInstance()
+  return authInstance?.currentUser !== null
 }
 
 // Sign up with email and password
 export async function signUp(email: string, password: string): Promise<User> {
+  const authInstance = getAuthInstance()
+  const dbInstance = getDbInstance()
+  if (!authInstance || !dbInstance) {
+    throw new Error('Firebase is not initialized. Make sure Firebase config is set.')
+  }
+  
   try {
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password)
+    const userCredential = await createUserWithEmailAndPassword(authInstance, email, password)
     const user = userCredential.user
 
     // Create user document in Firestore
-    await setDoc(doc(db, 'users', user.uid), {
+    await setDoc(doc(dbInstance, 'users', user.uid), {
       email: user.email,
       createdAt: new Date().toISOString(),
       syncMetadata: {
@@ -61,8 +74,13 @@ export async function signUp(email: string, password: string): Promise<User> {
 
 // Sign in with email and password
 export async function signIn(email: string, password: string): Promise<User> {
+  const authInstance = getAuthInstance()
+  if (!authInstance) {
+    throw new Error('Firebase is not initialized. Make sure Firebase config is set.')
+  }
+  
   try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password)
+    const userCredential = await signInWithEmailAndPassword(authInstance, email, password)
     return userCredential.user
   } catch (error: any) {
     const authError: AuthErrorWithCode = new Error(error.message || 'Sign in failed')
@@ -73,15 +91,21 @@ export async function signIn(email: string, password: string): Promise<User> {
 
 // Sign in with Google
 export async function signInWithGoogle(): Promise<User> {
+  const authInstance = getAuthInstance()
+  const dbInstance = getDbInstance()
+  if (!authInstance || !dbInstance) {
+    throw new Error('Firebase is not initialized. Make sure Firebase config is set.')
+  }
+  
   try {
     const provider = new GoogleAuthProvider()
-    const userCredential = await signInWithPopup(auth, provider)
+    const userCredential = await signInWithPopup(authInstance, provider)
     const user = userCredential.user
 
     // Check if user document exists, create if not
-    const userDoc = await getDoc(doc(db, 'users', user.uid))
+    const userDoc = await getDoc(doc(dbInstance, 'users', user.uid))
     if (!userDoc.exists()) {
-      await setDoc(doc(db, 'users', user.uid), {
+      await setDoc(doc(dbInstance, 'users', user.uid), {
         email: user.email,
         createdAt: new Date().toISOString(),
         syncMetadata: {
@@ -101,8 +125,13 @@ export async function signInWithGoogle(): Promise<User> {
 
 // Sign out
 export async function signOutUser(): Promise<void> {
+  const authInstance = getAuthInstance()
+  if (!authInstance) {
+    throw new Error('Firebase is not initialized. Make sure Firebase config is set.')
+  }
+  
   try {
-    await signOut(auth)
+    await signOut(authInstance)
   } catch (error: any) {
     const authError: AuthErrorWithCode = new Error(error.message || 'Sign out failed')
     authError.code = error.code
@@ -112,8 +141,13 @@ export async function signOutUser(): Promise<void> {
 
 // Reset password
 export async function resetPassword(email: string): Promise<void> {
+  const authInstance = getAuthInstance()
+  if (!authInstance) {
+    throw new Error('Firebase is not initialized. Make sure Firebase config is set.')
+  }
+  
   try {
-    await sendPasswordResetEmail(auth, email)
+    await sendPasswordResetEmail(authInstance, email)
   } catch (error: any) {
     const authError: AuthErrorWithCode = new Error(error.message || 'Password reset failed')
     authError.code = error.code
@@ -123,7 +157,12 @@ export async function resetPassword(email: string): Promise<void> {
 
 // Send email verification
 export async function sendVerificationEmail(): Promise<void> {
-  const user = auth.currentUser
+  const authInstance = getAuthInstance()
+  if (!authInstance) {
+    throw new Error('Firebase is not initialized. Make sure Firebase config is set.')
+  }
+  
+  const user = authInstance.currentUser
   if (!user) {
     throw new Error('No user is signed in')
   }

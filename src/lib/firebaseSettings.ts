@@ -1,5 +1,5 @@
 import { doc, getDoc, setDoc } from 'firebase/firestore'
-import { db } from './firebase'
+import { getDbInstance } from './firebase'
 import { getCurrentUser } from './firebaseAuth'
 
 export interface FirebaseSettings {
@@ -16,7 +16,11 @@ export async function loadSettingsFromFirebase(): Promise<FirebaseSettings | nul
     throw new Error('User not authenticated')
   }
 
-  const userRef = doc(db, 'users', user.uid)
+  const dbInstance = getDbInstance()
+  if (!dbInstance) {
+    throw new Error('Firebase is not initialized')
+  }
+  const userRef = doc(dbInstance, 'users', user.uid)
   const userDoc = await getDoc(userRef)
 
   if (!userDoc.exists()) {
@@ -43,7 +47,11 @@ export async function syncSettingsToFirebase(settings: {
     updatedAtMs: Date.now(),
   }
 
-  const userRef = doc(db, 'users', user.uid)
+  const dbInstance = getDbInstance()
+  if (!dbInstance) {
+    throw new Error('Firebase is not initialized')
+  }
+  const userRef = doc(dbInstance, 'users', user.uid)
   await setDoc(userRef, { settings: firebaseSettings }, { merge: true })
 }
 

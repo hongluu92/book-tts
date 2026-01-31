@@ -1,5 +1,5 @@
 import { collection, doc, getDocs, setDoc, getDoc, query, where } from 'firebase/firestore'
-import { db } from './firebase'
+import { getDbInstance } from './firebase'
 import { getCurrentUser } from './firebaseAuth'
 import { BookLocal } from '@/storage/db'
 
@@ -20,7 +20,12 @@ export async function loadBookshelfFromFirebase(): Promise<Record<string, Fireba
     throw new Error('User not authenticated')
   }
 
-  const booksRef = collection(db, 'users', user.uid, 'books')
+  const dbInstance = getDbInstance()
+  if (!dbInstance) {
+    throw new Error('Firebase is not initialized')
+  }
+
+  const booksRef = collection(dbInstance, 'users', user.uid, 'books')
   const snapshot = await getDocs(booksRef)
   const books: Record<string, FirebaseBookMetadata> = {}
 
@@ -41,7 +46,11 @@ export async function syncBookMetadataToFirebase(book: BookLocal): Promise<void>
     throw new Error('User not authenticated')
   }
 
-  const bookRef = doc(db, 'users', user.uid, 'books', book.bookFingerprint)
+  const dbInstance = getDbInstance()
+  if (!dbInstance) {
+    throw new Error('Firebase is not initialized')
+  }
+  const bookRef = doc(dbInstance, 'users', user.uid, 'books', book.bookFingerprint)
   const bookDoc = await getDoc(bookRef)
 
   const metadata: FirebaseBookMetadata = {
@@ -127,7 +136,11 @@ async function updateSyncMetadata(): Promise<void> {
     return
   }
 
-  const userRef = doc(db, 'users', user.uid)
+  const dbInstance = getDbInstance()
+  if (!dbInstance) {
+    return
+  }
+  const userRef = doc(dbInstance, 'users', user.uid)
   await setDoc(
     userRef,
     {
