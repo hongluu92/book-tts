@@ -80,7 +80,7 @@
 /* TTS Active highlight - outside layer to ensure it applies */
 .tts-active {
   background-color: var(--highlight-bg) !important;
-  transition: background-color 200ms ease, border-color 200ms ease !important;
+  transition: none !important; /* No transition for instant highlight appearance */
 }
 
 /* iOS Safe Area */
