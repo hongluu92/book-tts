@@ -44,12 +44,16 @@ export function extractHtmlFromSection(section: any): string {
  */
 function cleanQuoteSpacing(text: string): string {
   return text
-    .replaceAll(' “', '"')// Remove ALL smart quotes completely (not just spaces around them
+    // Remove curly quotes completely
+    .replace(/"/g, '') // Remove left double quotation mark
+    .replace(/"/g, '') // Remove right double quotation mark
     // Then clean regular quote spacing
-    .replace(/\s+”/g, '"') 
+    .replace(/\s+"/g, '"') 
     .replace(/"\s+/g, '"')
     .replace(/\s+'/g, "'")
     .replace(/'\s+/g, "'")
+    .replace(/\”/g, "") 
+  
 }
 
 /**
