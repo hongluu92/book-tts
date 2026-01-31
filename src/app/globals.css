@@ -65,13 +65,13 @@
 }
 
 @layer utilities {
-  .sentence-highlighted {
+  .sentence-bookmarked {
     background-color: rgba(251, 191, 36, 0.2);
     border-bottom: 2px solid #fbbf24;
     padding-bottom: 2px;
   }
 
-  .dark .sentence-highlighted {
+  .dark .sentence-bookmarked {
     background-color: rgba(251, 191, 36, 0.15);
     border-bottom: 2px solid #f59e0b;
   }

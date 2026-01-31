@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { ArrowLeft, Settings } from 'lucide-react'
-import { db, BookLocal, V2Chapter, V2Progress, V2ImportStatus, SentenceHighlight } from '@/storage/db'
+import { db, BookLocal, V2Chapter, V2Progress, V2ImportStatus, SentenceBookmark } from '@/storage/db'
 import { Sentence } from '@/lib/tts/types'
 import { useTts } from '@/hooks/useTts'
 import { useSentenceHighlight } from '@/hooks/useSentenceHighlight'
@@ -36,8 +36,8 @@ function ReaderContent() {
     sentenceIndex: number
     text: string
   } | null>(null)
-  const [highlights, setHighlights] = useState<Set<number>>(new Set())
-  const [showHighlights, setShowHighlights] = useState(false)
+  const [bookmarks, setBookmarks] = useState<Set<number>>(new Set())
+  const [showBookmarks, setShowBookmarks] = useState(false)
 
   const currentChapter = chapters[currentChapterIndex] || null
 
@@ -151,10 +151,8 @@ function ReaderContent() {
     }
   }, [bookFingerprint, chapters.length])
 
-  // Use ref to store stop function to avoid circular dependency
-  const stopRef = useRef<(() => void) | null>(null)
-  // Track if we should auto-play after chapter load
-  const autoPlayNextChapterRef = useRef(false)
+  // Track pending navigation intent for auto-play
+  const [pendingAutoPlay, setPendingAutoPlay] = useState(false)
 
   const {
     loadChapter,
@@ -167,7 +165,6 @@ function ReaderContent() {
   } = useChapterLoader({
     chapters,
     bookFingerprint,
-    onStop: () => stopRef.current?.(),
     scrollContainerRef: mainRef,
   })
 
@@ -212,29 +209,25 @@ function ReaderContent() {
       // Auto-advance to next chapter when current chapter finishes
       if (currentChapterIndex < chapters.length - 1) {
         const nextIndex = currentChapterIndex + 1
-        // Set flag to auto-play after chapter loads
-        autoPlayNextChapterRef.current = true
+        // Set pending auto-play intent
+        setPendingAutoPlay(true)
         setCurrentChapterIndex(nextIndex)
-        loadChapter(nextIndex)  // loadChapter will call stop() internally
+        stop()
+        loadChapter(nextIndex)
       }
     },
   })
 
-  // Update stop ref after useTts is initialized
-  useEffect(() => {
-    stopRef.current = stop
-  }, [stop])
-
   // Auto-play after chapter loads when onChapterEnd was triggered
   useEffect(() => {
-    // Only auto-play if flag is set, chapter is done loading, and sentences are available
-    if (autoPlayNextChapterRef.current && !loadingSentences && sentences.length > 0) {
-      // Reset flag first to prevent double-play
-      autoPlayNextChapterRef.current = false
+    // Only auto-play if pending intent is set, chapter is done loading, and sentences are available
+    if (pendingAutoPlay && !loadingSentences && sentences.length > 0) {
+      // Reset intent first to prevent double-play
+      setPendingAutoPlay(false)
       // Use playFrom(0) to explicitly start from beginning of new chapter
       playFrom(0)
     }
-  }, [loadingSentences, sentences.length, playFrom])
+  }, [pendingAutoPlay, loadingSentences, sentences.length, playFrom])
 
   const currentMarkerId = sentences[currentSentenceIndex]?.markerId || null
 
@@ -317,54 +310,54 @@ function ReaderContent() {
     }
   }, [progress, voices, voicesLoading, setSelectedVoice, setRate])
 
-  // Load highlights for current chapter
+  // Load bookmarks for current chapter
   useEffect(() => {
     if (!currentChapter) return
 
-    db.sentenceHighlights
+    db.sentenceBookmarks
       .where('[bookFingerprint+chapterId]')
       .equals([bookFingerprint, currentChapter.chapterId])
       .toArray()
       .then(items => {
-        setHighlights(new Set(items.map(h => h.sentenceIndex)))
+        setBookmarks(new Set(items.map(h => h.sentenceIndex)))
       })
-      .catch(err => console.error('Failed to load highlights:', err))
+      .catch(err => console.error('Failed to load bookmarks:', err))
   }, [currentChapter, bookFingerprint])
 
-  // Apply highlight class to HTML
+  // Apply bookmark class to HTML
   useEffect(() => {
-    if (!contentRef.current || highlights.size === 0) return
+    if (!contentRef.current || bookmarks.size === 0) return
 
-    const applyHighlights = () => {
+    const applyBookmarks = () => {
       // Use requestAnimationFrame to ensure DOM is ready
       requestAnimationFrame(() => {
         const container = contentRef.current
         if (!container) return
 
         let appliedCount = 0
-        highlights.forEach(sentenceIndex => {
+        bookmarks.forEach(sentenceIndex => {
           const span = container.querySelector(`span[data-sent="${sentenceIndex}"]`)
           if (span) {
-            if (!span.classList.contains('sentence-highlighted')) {
-              span.classList.add('sentence-highlighted')
+            if (!span.classList.contains('sentence-bookmarked')) {
+              span.classList.add('sentence-bookmarked')
             }
             appliedCount++
           }
         })
 
-        // If we have highlights but haven't found all spans yet, retry briefly
+        // If we have bookmarks but haven't found all spans yet, retry briefly
         // This helps when dangerouslySetInnerHTML is still processing or hydrating
         /* 
            NOTE: 
-           This assumes all highlights belong to the current chapter.
+           This assumes all bookmarks belong to the current chapter.
            If we have partial validation, we might retry unnecessarily, 
-           but usually highlights matches current chapter content.
+           but usually bookmarks matches current chapter content.
         */
       })
     }
 
     // Run immediately
-    applyHighlights()
+    applyBookmarks()
 
     if (!contentRef.current) return
 
@@ -376,7 +369,7 @@ function ReaderContent() {
           break
         }
       }
-      if (nodesAdded) applyHighlights()
+      if (nodesAdded) applyBookmarks()
     })
 
     observer.observe(contentRef.current, { childList: true, subtree: true })
@@ -384,7 +377,7 @@ function ReaderContent() {
     return () => {
       observer.disconnect()
     }
-  }, [highlights, chapterContent])
+  }, [bookmarks, chapterContent])
 
   // Khôi phục vị trí câu sau khi sentences được load và progress có sẵn
   // Chờ useTts hook reset xong rồi mới khôi phục
@@ -435,13 +428,66 @@ function ReaderContent() {
     }
   }, [progress, sentences.length, currentChapter, seek, currentSentenceIndex, setSentenceIndex])
 
+  // Helper to find the deepest span[data-sent] from a target element
+  // This ensures we get the actual sentence span being clicked, not a parent container
+  const findSentenceSpan = useCallback((target: HTMLElement): HTMLElement | null => {
+    // Strategy: Find the span[data-sent] that contains the target and has no child span[data-sent] that also contains the target
+    // This gives us the "innermost" or "deepest" sentence span
+
+    // Walk up from target to find all spans with data-sent
+    let current: HTMLElement | null = target
+    const candidateSpans: HTMLElement[] = []
+
+    while (current && current !== contentRef.current) {
+      if (current.tagName === 'SPAN' && current.hasAttribute('data-sent')) {
+        candidateSpans.push(current)
+      }
+      current = current.parentElement
+    }
+
+    if (candidateSpans.length === 0) {
+      // No parent span found, check if target or its children have spans
+      if (target.tagName === 'SPAN' && target.hasAttribute('data-sent')) {
+        candidateSpans.push(target)
+      } else {
+        const childSpan = target.querySelector('span[data-sent]')
+        if (childSpan) {
+          candidateSpans.push(childSpan as HTMLElement)
+        }
+      }
+    }
+
+    if (candidateSpans.length === 0) return null
+
+    // Find the span that contains target and has no child span[data-sent] that also contains target
+    // The first span in the array (closest to target) is the deepest one
+    for (const span of candidateSpans) {
+      // Check if this span has a child span[data-sent] that also contains the target
+      const childSpans = span.querySelectorAll('span[data-sent]')
+      let hasContainingChild = false
+      for (const childSpan of childSpans) {
+        if ((childSpan as HTMLElement).contains(target)) {
+          hasContainingChild = true
+          break
+        }
+      }
+      // If no containing child, this is the deepest span
+      if (!hasContainingChild) {
+        return span
+      }
+    }
+
+    // Fallback: return the first candidate (closest to target)
+    return candidateSpans[0]
+  }, [contentRef])
+
   // Touch event handling for long press on mobile
   const touchTimerRef = useRef<NodeJS.Timeout | null>(null)
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null)
 
   const handleTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement
-    const span = target.closest('span[data-sent]')
+    const span = findSentenceSpan(target)
     if (!span) return
 
     const touch = e.touches[0]
@@ -452,8 +498,11 @@ function ReaderContent() {
       const sentenceIndex = parseInt(span.getAttribute('data-sent') || '0', 10)
       const text = span.textContent || ''
 
-      // Seek to the sentence - highlight will be managed by useSentenceHighlight hook
-      seek(sentenceIndex)
+      // Stop TTS if playing, then set sentence index without auto-playing
+      // User can choose to play from here via context menu option
+      // Note: No auto-scroll here - scroll only happens when TTS is playing
+      stop()
+      setSentenceIndex(sentenceIndex)
 
       // Show context menu at touch position
       setContextMenu({
@@ -463,7 +512,7 @@ function ReaderContent() {
         text,
       })
     }, 500)
-  }, [seek])
+  }, [stop, setSentenceIndex, findSentenceSpan, sentences])
 
   const handleTouchEnd = useCallback(() => {
     // Clear the long press timer if touch ends before 500ms
@@ -493,14 +542,17 @@ function ReaderContent() {
     (e: React.MouseEvent<HTMLDivElement>) => {
       e.preventDefault()
       const target = e.target as HTMLElement
-      const span = target.closest('span[data-sent]')
+      const span = findSentenceSpan(target)
       if (!span) return
 
       const sentenceIndex = parseInt(span.getAttribute('data-sent') || '0', 10)
       const text = span.textContent || ''
 
-      // Seek to the sentence - highlight will be managed by useSentenceHighlight hook
-      seek(sentenceIndex)
+      // Stop TTS if playing, then set sentence index without auto-playing
+      // User can choose to play from here via context menu option
+      // Note: No auto-scroll here - scroll only happens when TTS is playing
+      stop()
+      setSentenceIndex(sentenceIndex)
 
       setContextMenu({
         x: e.clientX,
@@ -509,7 +561,7 @@ function ReaderContent() {
         text,
       })
     },
-    [seek],
+    [stop, setSentenceIndex, findSentenceSpan, sentences],
   )
 
   const handleReadFromHere = useCallback(() => {
@@ -524,23 +576,23 @@ function ReaderContent() {
     }
   }, [contextMenu, currentChapter, playFrom])
 
-  const handleHighlightSentence = useCallback(async () => {
+  const handleBookmarkSentence = useCallback(async () => {
     if (!contextMenu || !currentChapter) return
 
-    // Check if highlight already exists
-    const existing = await db.sentenceHighlights
+    // Check if bookmark already exists
+    const existing = await db.sentenceBookmarks
       .where('[bookFingerprint+chapterId]')
       .equals([bookFingerprint, currentChapter.chapterId])
       .filter(h => h.sentenceIndex === contextMenu.sentenceIndex)
       .first()
 
     if (existing) {
-      // If exists, remove it (Unhighlight)
+      // If exists, remove it (Unbookmark)
       if (existing.id) {
-        await db.sentenceHighlights.delete(existing.id)
+        await db.sentenceBookmarks.delete(existing.id)
 
         // Remove from local state
-        setHighlights((prev) => {
+        setBookmarks((prev) => {
           const next = new Set(prev)
           next.delete(contextMenu.sentenceIndex)
           return next
@@ -549,7 +601,7 @@ function ReaderContent() {
         // Remove class from DOM immediately
         const span = contentRef.current?.querySelector(`span[data-sent="${contextMenu.sentenceIndex}"]`)
         if (span) {
-          span.classList.remove('sentence-highlighted')
+          span.classList.remove('sentence-bookmarked')
         }
 
       }
@@ -557,7 +609,7 @@ function ReaderContent() {
       return
     }
 
-    const highlight: Omit<SentenceHighlight, 'id'> = {
+    const bookmark: Omit<SentenceBookmark, 'id'> = {
       bookFingerprint,
       chapterId: currentChapter.chapterId,
       sentenceIndex: contextMenu.sentenceIndex,
@@ -566,13 +618,13 @@ function ReaderContent() {
       createdAtMs: Date.now(),
     }
 
-    await db.sentenceHighlights.add(highlight)
-    // Reload highlights for this chapter
-    setHighlights((prev) => new Set(prev).add(contextMenu.sentenceIndex))
+    await db.sentenceBookmarks.add(bookmark)
+    // Reload bookmarks for this chapter
+    setBookmarks((prev) => new Set(prev).add(contextMenu.sentenceIndex))
     setContextMenu(null)
   }, [contextMenu, currentChapter, bookFingerprint, sentences])
 
-  const handleNavigateToHighlight = useCallback((chapterId: string, sentenceIndex: number) => {
+  const handleNavigateToBookmark = useCallback((chapterId: string, sentenceIndex: number) => {
     // Check if we are already in the correct chapter
     const targetChapterIndex = chapters.findIndex(c => c.chapterId === chapterId)
     if (targetChapterIndex === -1) return
@@ -742,9 +794,9 @@ function ReaderContent() {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setShowHighlights(true)}
+            onClick={() => setShowBookmarks(true)}
             className="h-9 w-9"
-            title="View Highlights"
+            title="View Bookmarks"
           >
             <Bookmark className="h-5 w-5 stroke-[2]" />
           </Button>
@@ -820,8 +872,8 @@ function ReaderContent() {
           position={{ x: contextMenu.x, y: contextMenu.y }}
           sentenceText={contextMenu.text}
           onReadFromHere={handleReadFromHere}
-          onHighlight={handleHighlightSentence}
-          isHighlighted={highlights.has(contextMenu.sentenceIndex)}
+          onHighlight={handleBookmarkSentence}
+          isHighlighted={bookmarks.has(contextMenu.sentenceIndex)}
           onClose={() => setContextMenu(null)}
         />
       )}
@@ -829,9 +881,9 @@ function ReaderContent() {
       <HighlightList
         bookFingerprint={bookFingerprint}
         chapters={chapters}
-        isOpen={showHighlights}
-        onClose={() => setShowHighlights(false)}
-        onNavigate={handleNavigateToHighlight}
+        isOpen={showBookmarks}
+        onClose={() => setShowBookmarks(false)}
+        onNavigate={handleNavigateToBookmark}
       />
     </div>
   )

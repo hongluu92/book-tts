@@ -194,13 +194,16 @@ export function useTts(options: UseTtsOptions) {
     if (isPaused) {
       // Mobile browsers (and some desktop ones) are unreliable with resume()
       // So we always cancel and restart the current sentence which is consistent everywhere
-      console.log('[useTts] Resuming by restarting current sentence')
+      // This ensures: "Pause rồi Play lại đọc lại câu vừa đọc" behavior
+      // currentSentenceIndex is preserved during pause, so restarting it will read the same sentence
+      console.log('[useTts] Resuming by restarting current sentence', currentSentenceIndex)
       isResumingRef.current = true
       engineRef.current.cancel()
 
       // Short delay to ensure cancel processed
       setIsPaused(false)
       isPlayingRef.current = true
+      // Restart from the same sentence index (ensures no index drift)
       playSentence(currentSentenceIndex)
     } else {
       isPlayingRef.current = true
@@ -210,8 +213,11 @@ export function useTts(options: UseTtsOptions) {
 
   const pause = useCallback(() => {
     if (engineRef.current) {
+      // Pause speech without changing currentSentenceIndex
+      // This allows play() to restart from the same sentence when resumed
       engineRef.current.pause()
       setIsPaused(true)
+      // Note: currentSentenceIndex is preserved, ensuring no index drift
     }
   }, [])
 

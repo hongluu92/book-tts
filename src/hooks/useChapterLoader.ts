@@ -6,14 +6,12 @@ import { loadChapterFromEpub, buildSentencesAndHtml } from '@/lib/epubHelpers'
 interface UseChapterLoaderOptions {
   chapters: V2Chapter[]
   bookFingerprint: string
-  onStop: () => void
   scrollContainerRef: React.RefObject<HTMLElement>
 }
 
 export function useChapterLoader({
   chapters,
   bookFingerprint,
-  onStop,
   scrollContainerRef,
 }: UseChapterLoaderOptions) {
   const hasRestoredPositionRef = useRef(false)
@@ -28,7 +26,6 @@ export function useChapterLoader({
       const chapter = chapters[index]
 
       try {
-        onStop()
         setLoadingSentences(true)
         setSentences([])
         setSentencesError(null)
@@ -69,7 +66,7 @@ export function useChapterLoader({
         setLoadingSentences(false)
       }
     },
-    [chapters, bookFingerprint, onStop, scrollContainerRef],
+    [chapters, bookFingerprint, scrollContainerRef],
   )
 
   return {
