@@ -4,12 +4,13 @@ import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { ArrowLeft, Settings } from 'lucide-react'
 import { db, BookLocal, V2Chapter, V2Progress, V2ImportStatus, SentenceBookmark } from '@/storage/db'
-import { Sentence } from '@/lib/tts/types'
+import { Sentence, PIPER_VOICES } from '@/lib/tts/types'
 import { useTts } from '@/hooks/useTts'
 import { useSentenceHighlight } from '@/hooks/useSentenceHighlight'
 import { useChapterLoader } from '@/hooks/useChapterLoader'
 import { useReaderSettings } from '@/hooks/useReaderSettings'
 import { useFirebaseSync } from '@/hooks/useFirebaseSync'
+import { usePiperTts } from '@/hooks/usePiperTts'
 import { getCurrentUser } from '@/lib/firebaseAuth'
 import TtsControls from '@/components/TtsControls'
 import ReaderSettings from '@/components/ReaderSettings'
@@ -29,6 +30,16 @@ function ReaderContent() {
   
   // Firebase sync hook
   const { autoPushProgress, autoPushBookmarks, flushProgress } = useFirebaseSync()
+
+  const {
+    engineManager,
+    piperReady,
+    piperDownloading,
+    piperInitDone,
+    downloadProgress,
+    storedVoices,
+    downloadVoice,
+  } = usePiperTts()
 
   const [book, setBook] = useState<BookLocal | null>(null)
   const [chapters, setChapters] = useState<V2Chapter[]>([])
@@ -225,6 +236,8 @@ function ReaderContent() {
       }
     },
     onProgress: () => { },
+    engineManager,
+    detectedLang: 'vi',
     onChapterEnd: () => {
       // Flush progress before moving to next chapter
       flushProgress().catch(err => console.warn('Failed to flush progress on chapter end:', err))
@@ -763,6 +776,13 @@ function ReaderContent() {
     }
   }, [stop, flushProgress])
 
+  // Background download Piper TTS voices (only after init finishes checking stored voices)
+  useEffect(() => {
+    if (engineManager && piperInitDone && !piperReady && !piperDownloading) {
+      engineManager.downloadVoicesInBackground(['vi', 'en']).catch(console.warn)
+    }
+  }, [engineManager, piperInitDone, piperReady, piperDownloading])
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -911,11 +931,26 @@ function ReaderContent() {
           }}
           onRateChange={setRate}
           onVoiceChange={setSelectedVoice}
+          onSeek={(index) => {
+            if (isPlaying) {
+              playFrom(index)
+            } else {
+              setSentenceIndex(index)
+            }
+          }}
           isSupported={isSupported}
           loading={loadingSentences}
           error={sentencesError}
           onReprocess={() => { }}
           reprocessing={reprocessing}
+          engineType={piperReady ? 'piper-wasm' : 'browser'}
+          piperDownloading={piperDownloading}
+          downloadProgress={downloadProgress ? { loaded: downloadProgress.loaded, total: downloadProgress.total } : null}
+          piperVoices={PIPER_VOICES}
+          piperStoredVoices={storedVoices}
+          activePiperVoiceId={piperReady ? 'vi_VN-vais1000-medium' : null}
+          onPiperVoiceChange={() => { /* TODO: voice switching */ }}
+          onDownloadPiperVoice={(voiceId) => downloadVoice(voiceId)}
         />
       </div>
 

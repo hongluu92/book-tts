@@ -30,6 +30,10 @@ export class BrowserSpeechEngine implements TtsEngine {
     return typeof window !== 'undefined' && 'speechSynthesis' in window
   }
 
+  getEngineType(): 'browser' {
+    return 'browser'
+  }
+
   loadVoices(): void {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
       return

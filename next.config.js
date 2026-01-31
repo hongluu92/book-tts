@@ -160,6 +160,37 @@ const nextConfig = {
   },
   // PWA needs trailingSlash for proper routing
   trailingSlash: true,
+  webpack: (config, { isServer }) => {
+    // Handle WASM files for onnxruntime-web
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      fs: false,
+      path: false,
+      crypto: false,
+    }
+
+    // onnxruntime-web v1.18.0: Force browser bundle (avoid Node.js entry)
+    const path = require('path')
+    if (!isServer) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        'onnxruntime-web': path.join(__dirname, 'node_modules/onnxruntime-web/dist/esm/ort.min.js'),
+      }
+    }
+
+    config.experiments = {
+      ...config.experiments,
+      asyncWebAssembly: true,
+    }
+
+    // Ensure .wasm files are treated as assets
+    config.module.rules.push({
+      test: /\.wasm$/,
+      type: 'asset/resource',
+    })
+
+    return config
+  },
 }
 
 module.exports = withPWA(nextConfig)
