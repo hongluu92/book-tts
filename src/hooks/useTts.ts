@@ -108,7 +108,7 @@ export function useTts(options: UseTtsOptions) {
   }, [loadAndSelectVoice])
 
   const playSentence = useCallback(
-    async (index: number) => {
+    async (index: number, isRetry: boolean = false) => {
       if (!engineRef.current || index < 0 || index >= sentences.length) {
         return
       }
@@ -116,17 +116,25 @@ export function useTts(options: UseTtsOptions) {
       const sentence = sentences[index]
       if (!sentence) return
 
-      setCurrentSentenceIndex(index)
-      onProgress?.(index)
-
-      // Wait for React to render and apply highlight before starting speech
-      // This prevents the "first read loses highlight" bug
-
+      // Track whether speech actually started for this sentence
+      let speechStarted = false
+      let startTimeout: NodeJS.Timeout | null = null
 
       const ttsOptions: TtsOptions = {
         voice: selectedVoice || undefined,
         rate,
         onStart: () => {
+          speechStarted = true
+          if (startTimeout) {
+            clearTimeout(startTimeout)
+            startTimeout = null
+          }
+          
+          // Only update currentSentenceIndex when speech actually starts
+          // This ensures highlight only appears when sentence is actually being read
+          setCurrentSentenceIndex(index)
+          onProgress?.(index)
+          
           setIsPlaying(true)
           setIsPaused(false)
           isPlayingRef.current = true
@@ -135,17 +143,71 @@ export function useTts(options: UseTtsOptions) {
           onSentenceStart?.(sentence)
         },
         onEnd: () => {
+          if (startTimeout) {
+            clearTimeout(startTimeout)
+            startTimeout = null
+          }
+
           if (isResumingRef.current || isRestartingRef.current) {
             return
           }
 
-          onSentenceEnd?.(sentence)
+          // Only call onSentenceEnd if speech actually started
+          if (speechStarted) {
+            onSentenceEnd?.(sentence)
+          }
 
-          // Auto-play next sentence if still playing
-          if (isPlayingRef.current && index < sentences.length - 1) {
+          // Auto-play next sentence if still playing AND speech started
+          if (isPlayingRef.current && speechStarted && index < sentences.length - 1) {
             playSentence(index + 1).catch((err) => {
               console.error('Failed to play next sentence:', err)
             })
+          } else {
+            setIsPlaying(false)
+            isPlayingRef.current = false
+            if (speechStarted && index === sentences.length - 1) {
+              onChapterEnd?.()
+            }
+          }
+        },
+        onError: (error) => {
+          if (startTimeout) {
+            clearTimeout(startTimeout)
+            startTimeout = null
+          }
+
+          if (isResumingRef.current) return
+
+          if (!error.message.includes('interrupted') && !error.message.includes('canceled')) {
+            console.error('TTS error:', error)
+          }
+          
+          // If speech never started, try to continue to next sentence
+          if (!speechStarted && isPlayingRef.current && index < sentences.length - 1) {
+            console.warn('[useTts] Speech did not start for sentence', index, ', trying next sentence')
+            playSentence(index + 1).catch((err) => {
+              console.error('Failed to play next sentence after error:', err)
+            })
+          } else {
+            setIsPlaying(false)
+            isPlayingRef.current = false
+          }
+        },
+      }
+
+      try {
+        // Check if text is empty or too short
+        const textToSpeak = sentence.text.trim()
+        if (!textToSpeak || textToSpeak.length === 0) {
+          console.warn('[useTts] Empty sentence text, skipping:', index)
+          // Skip empty sentences and continue to next
+          if (isPlayingRef.current && index < sentences.length - 1) {
+            // Small delay before playing next to avoid rapid fire
+            setTimeout(() => {
+              playSentence(index + 1).catch((err) => {
+                console.error('Failed to play next sentence after empty:', err)
+              })
+            }, 100)
           } else {
             setIsPlaying(false)
             isPlayingRef.current = false
@@ -153,32 +215,109 @@ export function useTts(options: UseTtsOptions) {
               onChapterEnd?.()
             }
           }
-        },
-        onError: (error) => {
-          if (isResumingRef.current) return
+          return
+        }
 
-          if (!error.message.includes('interrupted') && !error.message.includes('canceled')) {
-            console.error('TTS error:', error)
-          }
-          setIsPlaying(false)
-          isPlayingRef.current = false
-        },
-      }
-
-      try {
         // Enforce explicit cancel before speaking to prevent duplicates/queueing
         // This ensures "last command wins" behavior
         engineRef.current.cancel()
 
-        engineRef.current.speak(sentence.text, ttsOptions).catch((error) => {
+        // Small delay after cancel to ensure it's processed (especially on Windows)
+        // This prevents race condition where speak() is called before cancel() completes
+        await new Promise(resolve => setTimeout(resolve, 50))
+
+        // Set a timeout to detect if speech doesn't start within reasonable time
+        // This handles cases where onStart never fires (browser bugs, etc.)
+        startTimeout = setTimeout(() => {
+          if (!speechStarted && isPlayingRef.current) {
+            if (!isRetry) {
+              // First attempt failed, retry once
+              console.warn('[useTts] Speech did not start within 2 seconds for sentence', index, 'text:', textToSpeak.substring(0, 50))
+              console.log('[useTts] Retrying sentence', index)
+              // Cancel and retry
+              if (engineRef.current) {
+                engineRef.current.cancel()
+                setTimeout(() => {
+                  if (isPlayingRef.current && !speechStarted) {
+                    playSentence(index, true).catch((err) => {
+                      console.error('Failed to retry sentence:', err)
+                      // If retry fails, try next sentence
+                      if (index < sentences.length - 1) {
+                        playSentence(index + 1, false).catch((err2) => {
+                          console.error('Failed to play next sentence after retry failure:', err2)
+                          setIsPlaying(false)
+                          isPlayingRef.current = false
+                        })
+                      } else {
+                        setIsPlaying(false)
+                        isPlayingRef.current = false
+                      }
+                    })
+                  }
+                }, 100)
+              }
+            } else {
+              // Retry also failed, skip to next sentence
+              console.warn('[useTts] Retry also failed for sentence', index, ', skipping to next')
+              if (index < sentences.length - 1) {
+                playSentence(index + 1, false).catch((err) => {
+                  console.error('Failed to play next sentence after retry failure:', err)
+                  setIsPlaying(false)
+                  isPlayingRef.current = false
+                })
+              } else {
+                setIsPlaying(false)
+                isPlayingRef.current = false
+              }
+            }
+          }
+        }, 2000) as unknown as NodeJS.Timeout
+
+        engineRef.current.speak(textToSpeak, ttsOptions).catch((error) => {
+          if (startTimeout) {
+            clearTimeout(startTimeout)
+            startTimeout = null
+          }
           console.error('Failed to speak:', error)
-          setIsPlaying(false)
-          isPlayingRef.current = false
+          // Retry once on error if not already retried
+          if (!speechStarted && isPlayingRef.current && !isRetry) {
+            console.log('[useTts] Retrying sentence after error:', index)
+            setTimeout(() => {
+              if (isPlayingRef.current && !speechStarted) {
+                playSentence(index, true).catch((err) => {
+                  console.error('Failed to retry sentence after error:', err)
+                  setIsPlaying(false)
+                  isPlayingRef.current = false
+                })
+              }
+            }, 200)
+          } else {
+            setIsPlaying(false)
+            isPlayingRef.current = false
+          }
         })
       } catch (error) {
+        if (startTimeout) {
+          clearTimeout(startTimeout)
+          startTimeout = null
+        }
         console.error('Failed to speak:', error)
-        setIsPlaying(false)
-        isPlayingRef.current = false
+        // Retry once on exception if not already retried
+        if (!speechStarted && isPlayingRef.current && !isRetry) {
+          console.log('[useTts] Retrying sentence after exception:', index)
+          setTimeout(() => {
+            if (isPlayingRef.current && !speechStarted) {
+              playSentence(index, true).catch((err) => {
+                console.error('Failed to retry sentence after exception:', err)
+                setIsPlaying(false)
+                isPlayingRef.current = false
+              })
+            }
+          }, 200)
+        } else {
+          setIsPlaying(false)
+          isPlayingRef.current = false
+        }
       }
     },
     [sentences, selectedVoice, rate, onSentenceStart, onSentenceEnd, onProgress],

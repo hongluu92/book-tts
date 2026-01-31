@@ -28,7 +28,7 @@ function ReaderContent() {
   const { fontSize, setFontSize, fontFamily, setFontFamily, theme, setTheme, showSettings, setShowSettings } = useReaderSettings()
   
   // Firebase sync hook
-  const { autoPushProgress, autoPushBookmarks } = useFirebaseSync()
+  const { autoPushProgress, autoPushBookmarks, flushProgress } = useFirebaseSync()
 
   const [book, setBook] = useState<BookLocal | null>(null)
   const [chapters, setChapters] = useState<V2Chapter[]>([])
@@ -206,17 +206,29 @@ function ReaderContent() {
           updatedAtMs: Date.now(),
         }
         setProgress(updated)
-        db.v2Progress.put(updated)
         
-        // Auto-push to Firebase if authenticated
-        const user = getCurrentUser()
-        if (user) {
-          autoPushProgress(updated)
-        }
+        // Save to local DB first, then sync to Firebase
+        db.v2Progress.put(updated).then(() => {
+          // Auto-push to Firebase if authenticated
+          const user = getCurrentUser()
+          if (user) {
+            autoPushProgress(updated)
+          }
+        }).catch(err => {
+          console.error('Failed to save progress to local DB:', err)
+          // Still try to sync to Firebase even if local save fails
+          const user = getCurrentUser()
+          if (user) {
+            autoPushProgress(updated)
+          }
+        })
       }
     },
     onProgress: () => { },
     onChapterEnd: () => {
+      // Flush progress before moving to next chapter
+      flushProgress().catch(err => console.warn('Failed to flush progress on chapter end:', err))
+      
       // Auto-advance to next chapter when current chapter finishes
       if (currentChapterIndex < chapters.length - 1) {
         const nextIndex = currentChapterIndex + 1
@@ -240,7 +252,9 @@ function ReaderContent() {
     }
   }, [pendingAutoPlay, loadingSentences, sentences.length, playFrom])
 
-  const currentMarkerId = sentences[currentSentenceIndex]?.markerId || null
+  const currentSentence = sentences[currentSentenceIndex] || null
+  const currentMarkerId = currentSentence?.markerId || null
+  const currentSentenceText = currentSentence?.text || null
 
   // Only scroll when:
   // 1. Audio is playing
@@ -254,7 +268,7 @@ function ReaderContent() {
     }
   }, [currentSentenceIndex])
 
-  useSentenceHighlight(contentRef, currentMarkerId, shouldScroll, mainRef)
+  useSentenceHighlight(contentRef, currentMarkerId, currentSentenceText, shouldScroll, mainRef)
 
   // Note: Highlight is now fully handled by useSentenceHighlight hook
   // No need for separate effect here - it was causing conflicts
@@ -580,14 +594,11 @@ function ReaderContent() {
   const handleReadFromHere = useCallback(() => {
     if (contextMenu && currentChapter) {
       const targetIndex = contextMenu.sentenceIndex
-      playFrom(targetIndex)
-      // Temporarily disable auto-scroll when user manually starts playback
-      shouldAutoScrollRef.current = false
-      setTimeout(() => {
-        shouldAutoScrollRef.current = true
-      }, 500)
+      // Set index first, then call play() - exactly like clicking play button
+      setSentenceIndex(targetIndex)
+      play()
     }
-  }, [contextMenu, currentChapter, playFrom])
+  }, [contextMenu, currentChapter, setSentenceIndex, play])
 
   const handleBookmarkSentence = useCallback(async () => {
     if (!contextMenu || !currentChapter) return
@@ -739,10 +750,18 @@ function ReaderContent() {
   // Users may want audio to continue while switching tabs.
 
   useEffect(() => {
-    const handleBeforeUnload = () => stop()
+    const handleBeforeUnload = () => {
+      stop()
+      // Flush pending progress sync before page unload
+      flushProgress().catch(err => console.warn('Failed to flush progress on unload:', err))
+    }
     window.addEventListener('beforeunload', handleBeforeUnload)
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [stop])
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      // Flush pending progress sync on unmount
+      flushProgress().catch(err => console.warn('Failed to flush progress on unmount:', err))
+    }
+  }, [stop, flushProgress])
 
   if (loading) {
     return (

@@ -20,6 +20,8 @@ export function useFirebaseSync() {
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const pushTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const progressTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const latestProgressRef = useRef<V2Progress | null>(null)
 
   // Check for new data on Firebase
   const checkForNewData = useCallback(async (): Promise<SyncStatus> => {
@@ -147,22 +149,65 @@ export function useFirebaseSync() {
         return // Not authenticated, skip
       }
 
+      // Store the latest progress to ensure we always sync the most recent one
+      latestProgressRef.current = progress
+
       // Clear existing timeout
-      if (pushTimeoutRef.current) {
-        clearTimeout(pushTimeoutRef.current)
+      if (progressTimeoutRef.current) {
+        clearTimeout(progressTimeoutRef.current)
       }
 
-      // Debounce push
-      pushTimeoutRef.current = setTimeout(async () => {
+      // Debounce push - always sync the latest progress
+      progressTimeoutRef.current = setTimeout(async () => {
+        const progressToSync = latestProgressRef.current
+        if (!progressToSync) {
+          return
+        }
+
         try {
-          await syncProgressToFirebase(progress.bookFingerprint, progress)
+          // Get the latest progress from local DB to ensure we have the most up-to-date data
+          const latestFromDb = await db.v2Progress.get(progressToSync.bookFingerprint)
+          const finalProgress = latestFromDb || progressToSync
+          
+          await syncProgressToFirebase(finalProgress.bookFingerprint, finalProgress)
+          latestProgressRef.current = null // Clear after successful sync
         } catch (err) {
           console.warn('Failed to auto-push progress:', err)
+          // Keep progress in ref so we can retry later
         }
-      }, 3000)
+      }, 2000) // Reduced from 3000ms to 2000ms for faster sync
     },
     []
   )
+
+  // Flush pending progress sync (call this on unmount or when stopping)
+  const flushProgress = useCallback(async () => {
+    if (progressTimeoutRef.current) {
+      clearTimeout(progressTimeoutRef.current)
+      progressTimeoutRef.current = null
+    }
+
+    const progressToSync = latestProgressRef.current
+    if (!progressToSync) {
+      return
+    }
+
+    const user = getCurrentUser()
+    if (!user) {
+      return
+    }
+
+    try {
+      // Get the latest progress from local DB
+      const latestFromDb = await db.v2Progress.get(progressToSync.bookFingerprint)
+      const finalProgress = latestFromDb || progressToSync
+      
+      await syncProgressToFirebase(finalProgress.bookFingerprint, finalProgress)
+      latestProgressRef.current = null
+    } catch (err) {
+      console.warn('Failed to flush progress:', err)
+    }
+  }, [])
 
   // Auto-push bookmarks for a book (debounced)
   const autoPushBookmarks = useCallback(
@@ -222,5 +267,6 @@ export function useFirebaseSync() {
     autoPushProgress,
     autoPushBookmarks,
     autoPushBookshelf,
+    flushProgress,
   }
 }

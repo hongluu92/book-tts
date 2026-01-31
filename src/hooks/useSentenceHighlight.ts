@@ -2,9 +2,29 @@
 
 import { useEffect, useRef, RefObject } from 'react'
 
+// Helper function to normalize text for comparison
+// This should match the text cleaning used in TTS engine
+function normalizeText(text: string): string {
+  return text
+    .replace(/\s+/g, ' ') // Normalize whitespace
+    .replace(/["""'''']/g, '') // Remove smart quotes (matching TTS engine)
+    .replace(/\s+"/g, '"') // Normalize quote spacing
+    .replace(/"\s+/g, '"')
+    .replace(/\s+'/g, "'")
+    .replace(/'\s+/g, "'")
+    .trim()
+    .toLowerCase() // Case-insensitive comparison
+}
+
+// Helper function to get text content of an element
+function getElementText(element: HTMLElement): string {
+  return normalizeText(element.textContent || element.innerText || '')
+}
+
 export function useSentenceHighlight(
   contentRef: RefObject<HTMLDivElement>,
   markerId: string | null,
+  sentenceText: string | null,
   active: boolean,
   scrollContainerRef?: RefObject<HTMLElement>,
 ) {
@@ -46,11 +66,115 @@ export function useSentenceHighlight(
     // Update previous markerId
     prevMarkerIdRef.current = markerId
 
-    // Helper function to find element
+    // Helper function to find element by text content
+    const findElementByText = (targetText: string, previousElement: HTMLElement | null): HTMLElement | null => {
+      if (!contentRef.current || !targetText) return null
+
+      const normalizedTarget = normalizeText(targetText)
+      
+      // Get all potential elements (span and p tags)
+      const allElements = contentRef.current.querySelectorAll('span[data-sent], p, span[id^="s-"]') as NodeListOf<HTMLElement>
+
+      // Find all elements with matching text
+      const exactMatches: HTMLElement[] = []
+      const partialMatches: HTMLElement[] = []
+      
+      for (const el of Array.from(allElements)) {
+        const elText = getElementText(el)
+        // Exact match is best
+        if (elText === normalizedTarget) {
+          exactMatches.push(el)
+        } else if (elText.length > 0 && normalizedTarget.length > 0) {
+          // Check if texts are similar (one contains the other or vice versa)
+          // Use a threshold to avoid matching very different texts
+          const similarity = Math.min(elText.length, normalizedTarget.length) / Math.max(elText.length, normalizedTarget.length)
+          if (similarity > 0.7) {
+            // If one text contains the other (for partial matches)
+            if (elText.includes(normalizedTarget) || normalizedTarget.includes(elText)) {
+              partialMatches.push(el)
+            }
+          }
+        }
+      }
+
+      // Prioritize exact matches
+      const candidates = exactMatches.length > 0 ? exactMatches : partialMatches
+
+      if (candidates.length === 0) {
+        // Fallback: try to find by markerId
+        let element = contentRef.current.querySelector(`#${markerId}`) as HTMLElement
+        if (!element) {
+          try {
+            element = contentRef.current.querySelector(`#${CSS.escape(markerId)}`) as HTMLElement
+          } catch (e) {
+            // CSS.escape might not be available in all browsers
+          }
+        }
+        if (!element) {
+          const sentenceIndex = markerId.match(/s-(\d+)/)?.[1]
+          if (sentenceIndex) {
+            element = contentRef.current.querySelector(`span[data-sent="${sentenceIndex}"]`) as HTMLElement
+          }
+        }
+        return element
+      }
+
+      // If we have a previous element, find the closest one
+      if (previousElement && candidates.length > 1) {
+        let closest: HTMLElement | null = null
+        let minDistance = Infinity
+
+        const prevRect = previousElement.getBoundingClientRect()
+        const prevTop = prevRect.top + prevRect.height / 2
+
+        for (const candidate of candidates) {
+          const candidateRect = candidate.getBoundingClientRect()
+          const candidateTop = candidateRect.top + candidateRect.height / 2
+          
+          // Calculate distance (prefer elements below the previous one)
+          const distance = Math.abs(candidateTop - prevTop)
+          
+          // Prefer elements that come after the previous one
+          if (candidateTop >= prevTop && distance < minDistance) {
+            minDistance = distance
+            closest = candidate
+          }
+        }
+
+        // If no element found below, use the closest one
+        if (!closest) {
+          for (const candidate of candidates) {
+            const candidateRect = candidate.getBoundingClientRect()
+            const candidateTop = candidateRect.top + candidateRect.height / 2
+            const distance = Math.abs(candidateTop - prevTop)
+            
+            if (distance < minDistance) {
+              minDistance = distance
+              closest = candidate
+            }
+          }
+        }
+
+        return closest || candidates[0]
+      }
+
+      // No previous element, return the first candidate
+      return candidates[0]
+    }
+
+    // Helper function to find element (with fallback to markerId)
     const findElement = (): HTMLElement | null => {
       if (!contentRef.current) return null
 
-      // Try to find element by ID
+      // First try to find by text content if available
+      if (sentenceText) {
+        const elementByText = findElementByText(sentenceText, elementRef.current)
+        if (elementByText) {
+          return elementByText
+        }
+      }
+
+      // Fallback: try to find element by ID
       let element = contentRef.current.querySelector(`#${markerId}`) as HTMLElement
 
       // If not found, try with escaped ID (for special characters)
@@ -199,5 +323,5 @@ export function useSentenceHighlight(
       // DO NOT remove highlight in cleanup
       // It will be removed when markerId changes to a different sentence
     }
-  }, [markerId, active, contentRef, scrollContainerRef])
+  }, [markerId, sentenceText, active, contentRef, scrollContainerRef])
 }
