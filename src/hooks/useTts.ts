@@ -31,6 +31,7 @@ export function useTts(options: UseTtsOptions) {
   const prevRateRef = useRef(1.0)
   const isRestartingRef = useRef(false)
   const isResumingRef = useRef(false)
+  const isPlayingSentenceRef = useRef(false) // Lock to prevent concurrent playSentence calls
 
   const usePiper = engineManager && engineManager.getPreference() !== 'browser' && engineManager.isPiperReadyForLang(detectedLang)
 
@@ -121,6 +122,14 @@ export function useTts(options: UseTtsOptions) {
       const sentence = sentences[index]
       if (!sentence) return
 
+      // Lock mechanism: prevent concurrent playSentence calls
+      if (isPlayingSentenceRef.current) {
+        console.warn('[useTts] playSentence already in progress, skipping duplicate call for index:', index)
+        return
+      }
+
+      isPlayingSentenceRef.current = true
+
       // Track whether speech actually started for this sentence
       let speechStarted = false
       let startTimeout: NodeJS.Timeout | null = null
@@ -135,6 +144,9 @@ export function useTts(options: UseTtsOptions) {
             startTimeout = null
           }
           
+          // Release lock when speech actually starts
+          isPlayingSentenceRef.current = false
+          
           // Only update currentSentenceIndex when speech actually starts
           // This ensures highlight only appears when sentence is actually being read
           setCurrentSentenceIndex(index)
@@ -146,12 +158,35 @@ export function useTts(options: UseTtsOptions) {
           isRestartingRef.current = false
           isResumingRef.current = false
           onSentenceStart?.(sentence)
+
+          // Preload next sentence in background while current sentence is playing
+          if (index < sentences.length - 1) {
+            const nextSentence = sentences[index + 1]
+            if (nextSentence && nextSentence.text.trim()) {
+              const nextTtsOptions: TtsOptions = {
+                voice: selectedVoice || undefined,
+                rate,
+              }
+              if (usePiper && engineManager) {
+                engineManager.preloadNext(nextSentence.text.trim(), detectedLang, nextTtsOptions).catch((err) => {
+                  console.warn('[useTts] Failed to preload next sentence:', err)
+                })
+              } else if (engineRef.current?.preloadNext) {
+                engineRef.current.preloadNext(nextSentence.text.trim(), nextTtsOptions).catch((err) => {
+                  console.warn('[useTts] Failed to preload next sentence:', err)
+                })
+              }
+            }
+          }
         },
         onEnd: () => {
           if (startTimeout) {
             clearTimeout(startTimeout)
             startTimeout = null
           }
+
+          // Release lock
+          isPlayingSentenceRef.current = false
 
           if (isResumingRef.current || isRestartingRef.current) {
             return
@@ -164,9 +199,13 @@ export function useTts(options: UseTtsOptions) {
 
           // Auto-play next sentence if still playing AND speech started
           if (isPlayingRef.current && speechStarted && index < sentences.length - 1) {
-            playSentence(index + 1).catch((err) => {
-              console.error('Failed to play next sentence:', err)
-            })
+            // Small delay to ensure queue is ready
+            setTimeout(() => {
+              playSentence(index + 1).catch((err) => {
+                console.error('Failed to play next sentence:', err)
+                isPlayingSentenceRef.current = false
+              })
+            }, 10)
           } else {
             setIsPlaying(false)
             isPlayingRef.current = false
@@ -181,6 +220,9 @@ export function useTts(options: UseTtsOptions) {
             startTimeout = null
           }
 
+          // Release lock
+          isPlayingSentenceRef.current = false
+
           if (isResumingRef.current) return
 
           if (!error.message.includes('interrupted') && !error.message.includes('canceled')) {
@@ -190,9 +232,12 @@ export function useTts(options: UseTtsOptions) {
           // If speech never started, try to continue to next sentence
           if (!speechStarted && isPlayingRef.current && index < sentences.length - 1) {
             console.warn('[useTts] Speech did not start for sentence', index, ', trying next sentence')
-            playSentence(index + 1).catch((err) => {
-              console.error('Failed to play next sentence after error:', err)
-            })
+            setTimeout(() => {
+              playSentence(index + 1).catch((err) => {
+                console.error('Failed to play next sentence after error:', err)
+                isPlayingSentenceRef.current = false
+              })
+            }, 10)
           } else {
             setIsPlaying(false)
             isPlayingRef.current = false
@@ -224,14 +269,17 @@ export function useTts(options: UseTtsOptions) {
         }
 
         // Enforce explicit cancel before speaking to prevent duplicates/queueing
-        if (usePiper && engineManager) {
-          engineManager.cancel()
-        } else if (engineRef.current) {
-          engineRef.current.cancel()
+        // BUT: Don't cancel if we're just continuing to next sentence (queue will handle it)
+        // Only cancel if this is a new start or retry
+        if (!isRetry || index === currentSentenceIndex) {
+          if (usePiper && engineManager) {
+            engineManager.cancel()
+          } else if (engineRef.current) {
+            engineRef.current.cancel()
+          }
+          // Small delay after cancel to ensure it's processed (especially on Windows)
+          await new Promise(resolve => setTimeout(resolve, 50))
         }
-
-        // Small delay after cancel to ensure it's processed (especially on Windows)
-        await new Promise(resolve => setTimeout(resolve, 50))
 
         // Set a timeout to detect if speech doesn't start within reasonable time
         // This handles cases where onStart never fires (browser bugs, etc.)
@@ -324,6 +372,9 @@ export function useTts(options: UseTtsOptions) {
           })
         }
       } catch (error) {
+        // Release lock on error
+        isPlayingSentenceRef.current = false
+        
         if (startTimeout) {
           clearTimeout(startTimeout)
           startTimeout = null
@@ -338,6 +389,7 @@ export function useTts(options: UseTtsOptions) {
                 console.error('Failed to retry sentence after exception:', err)
                 setIsPlaying(false)
                 isPlayingRef.current = false
+                isPlayingSentenceRef.current = false
               })
             }
           }, 200)

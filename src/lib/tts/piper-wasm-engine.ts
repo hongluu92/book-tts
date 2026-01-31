@@ -11,6 +11,13 @@ async function getTtsModule() {
   return ttsModule
 }
 
+interface QueuedSpeak {
+  text: string
+  options: TtsOptions
+  resolve: () => void
+  reject: (error: Error) => void
+}
+
 export class PiperWasmEngine implements TtsEngine {
   private audioContext: AudioContext | null = null
   private currentSource: AudioBufferSourceNode | null = null
@@ -19,9 +26,13 @@ export class PiperWasmEngine implements TtsEngine {
   private isPausedState = false
   private startedAt = 0
   private currentBuffer: AudioBuffer | null = null
+  private nextBuffer: AudioBuffer | null = null // Preloaded buffer for next sentence
+  private nextText: string | null = null // Text of preloaded sentence
   private onDownloadProgress: ((progress: ModelDownloadProgress) => void) | null = null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private session: any = null
+  private speakQueue: QueuedSpeak[] = []
+  private isSpeaking = false // Track if currently speaking
 
   isSupported(): boolean {
     return typeof window !== 'undefined' && typeof AudioContext !== 'undefined'
@@ -112,45 +123,168 @@ export class PiperWasmEngine implements TtsEngine {
       throw new Error('Piper voice not initialized. Call initVoice() first.')
     }
 
-    const ctx = this.getAudioContext()
-    if (ctx.state === 'suspended') {
-      await ctx.resume()
+    // Queue the speak request if already speaking
+    return new Promise<void>((resolve, reject) => {
+      const queued: QueuedSpeak = { text, options, resolve, reject }
+      
+      if (this.isSpeaking) {
+        // Add to queue
+        this.speakQueue.push(queued)
+        console.log('[PiperWasmEngine] Queued speak request, queue length:', this.speakQueue.length)
+        return
+      }
+
+      // Process immediately
+      this.processSpeak(queued)
+    })
+  }
+
+  private async processSpeak(queued: QueuedSpeak): Promise<void> {
+    if (this.isSpeaking) {
+      // Should not happen, but add to queue just in case
+      this.speakQueue.push(queued)
+      return
     }
 
-    options.onStart?.()
+    this.isSpeaking = true
+    const { text, options, resolve, reject } = queued
 
     try {
-      const blob = await this.session.predict(text)
+      const ctx = this.getAudioContext()
+      if (ctx.state === 'suspended') {
+        await ctx.resume()
+      }
 
-      const arrayBuffer = await blob.arrayBuffer()
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
-      this.currentBuffer = audioBuffer
-
-      return new Promise<void>((resolve) => {
-        const source = ctx.createBufferSource()
-        source.buffer = audioBuffer
-        source.playbackRate.value = options.rate ?? 1.0
-        source.connect(ctx.destination)
-        this.currentSource = source
-        this.isPausedState = false
-        this.startedAt = ctx.currentTime
-
-        source.onended = () => {
-          this.currentSource = null
-          this.currentBuffer = null
-          if (!this.isPausedState) {
-            options.onEnd?.()
-          }
-          resolve()
+      // Check if we have preloaded audio for this text
+      // Normalize text for comparison (trim whitespace)
+      const normalizedText = text.trim()
+      let audioBuffer: AudioBuffer
+      if (this.nextBuffer && this.nextText && this.nextText.trim() === normalizedText) {
+        // Use preloaded buffer
+        audioBuffer = this.nextBuffer
+        this.nextBuffer = null
+        this.nextText = null
+        console.log('[PiperWasmEngine] Using preloaded audio for:', normalizedText.substring(0, 50))
+      } else {
+        // Generate new audio
+        try {
+          const blob = await this.session.predict(text)
+          const arrayBuffer = await blob.arrayBuffer()
+          audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error))
+          options.onError?.(err)
+          throw err
         }
+      }
 
-        source.start(0)
-      })
+      this.currentBuffer = audioBuffer
+      options.onStart?.()
+
+      const source = ctx.createBufferSource()
+      source.buffer = audioBuffer
+      source.playbackRate.value = options.rate ?? 1.0
+      source.connect(ctx.destination)
+      this.currentSource = source
+      this.isPausedState = false
+      this.startedAt = ctx.currentTime
+
+      source.onended = () => {
+        // Only process if this is still the current source (prevent race conditions)
+        if (this.currentSource !== source) {
+          console.warn('[PiperWasmEngine] onended fired for non-current source, ignoring')
+          return
+        }
+        
+        this.currentSource = null
+        this.currentBuffer = null
+        if (!this.isPausedState) {
+          options.onEnd?.()
+        }
+        
+        // Mark as not speaking and process next in queue
+        this.isSpeaking = false
+        
+        // Process next item in queue
+        if (this.speakQueue.length > 0) {
+          const next = this.speakQueue.shift()!
+          // Use setTimeout to ensure current call stack completes
+          setTimeout(() => {
+            this.processSpeak(next).catch((err) => {
+              console.error('[PiperWasmEngine] Error processing queued speak:', err)
+              next.reject(err)
+            })
+          }, 0)
+        }
+        
+        resolve()
+      }
+
+      source.start(0)
     } catch (error) {
+      this.isSpeaking = false
       const err = error instanceof Error ? error : new Error(String(error))
-      options.onError?.(err)
-      throw err
+      reject(err)
+      
+      // Process next in queue even on error
+      if (this.speakQueue.length > 0) {
+        const next = this.speakQueue.shift()!
+        this.processSpeak(next).catch((err) => {
+          console.error('[PiperWasmEngine] Error processing queued speak after error:', err)
+          next.reject(err)
+        })
+      }
     }
+  }
+
+  async preloadNext(text: string, options: TtsOptions = {}): Promise<void> {
+    if (!this.isSupported() || !this.isInitialized || !this.session) {
+      return
+    }
+
+    // Normalize text for comparison
+    const normalizedText = text.trim()
+    if (!normalizedText) {
+      return
+    }
+
+    // Don't preload if we already have this text preloaded
+    if (this.nextText && this.nextText.trim() === normalizedText && this.nextBuffer) {
+      return
+    }
+
+    try {
+      // Clear old preload
+      this.nextBuffer = null
+      this.nextText = null
+
+      // Generate audio in background
+      const blob = await this.session.predict(normalizedText)
+      const arrayBuffer = await blob.arrayBuffer()
+      const ctx = this.getAudioContext()
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+      
+      this.nextBuffer = audioBuffer
+      this.nextText = normalizedText
+      console.log('[PiperWasmEngine] Preloaded audio for:', normalizedText.substring(0, 50))
+    } catch (error) {
+      console.warn('[PiperWasmEngine] Failed to preload audio:', error)
+      // Don't throw - preload failure shouldn't break playback
+    }
+  }
+
+  hasPreloaded(): boolean {
+    return this.nextBuffer !== null
+  }
+
+  async usePreloaded(options: TtsOptions = {}): Promise<void> {
+    if (!this.nextBuffer || !this.nextText) {
+      throw new Error('No preloaded audio available')
+    }
+
+    // Use the preloaded buffer - speak() will check and use it
+    const text = this.nextText
+    return this.speak(text, options)
   }
 
   cancel(): void {
@@ -165,6 +299,15 @@ export class PiperWasmEngine implements TtsEngine {
       this.currentSource = null
     }
     this.currentBuffer = null
+    
+    // Clear queue and reject all pending requests
+    this.speakQueue.forEach((queued) => {
+      queued.reject(new Error('Speech synthesis canceled'))
+    })
+    this.speakQueue = []
+    this.isSpeaking = false
+    
+    // Keep nextBuffer - it's for the next sentence
   }
 
   pause(): void {
@@ -187,6 +330,8 @@ export class PiperWasmEngine implements TtsEngine {
 
   destroy(): void {
     this.cancel()
+    this.nextBuffer = null
+    this.nextText = null
     if (this.audioContext) {
       this.audioContext.close()
       this.audioContext = null

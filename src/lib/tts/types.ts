@@ -7,6 +7,12 @@ export interface TtsEngine {
   resume(): void
   isSupported(): boolean
   getEngineType(): TtsEngineType
+  // Optional: Preload next sentence audio (for seamless playback)
+  preloadNext?(text: string, options: TtsOptions): Promise<void>
+  // Optional: Check if preloaded audio is available
+  hasPreloaded?(): boolean
+  // Optional: Use preloaded audio for next speak call
+  usePreloaded?(options: TtsOptions): Promise<void>
 }
 
 export interface TtsOptions {

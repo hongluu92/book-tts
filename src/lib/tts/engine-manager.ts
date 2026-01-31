@@ -146,6 +146,33 @@ export class TtsEngineManager {
     await this.browserEngine.speak(text, options)
   }
 
+  async preloadNext(text: string, lang: string, options: TtsOptions): Promise<void> {
+    const engine = this.getEngineForLang(lang)
+
+    if (engine.getEngineType() === 'piper-wasm') {
+      const piperVoice = PIPER_VOICES.find((v) => v.lang === lang)
+      if (piperVoice && engine.preloadNext) {
+        try {
+          await this.piperEngine.initVoice(piperVoice.voiceId)
+          await engine.preloadNext(text, options)
+          return
+        } catch (error) {
+          console.warn('[TtsEngineManager] Failed to preload with Piper:', error)
+        }
+      }
+    }
+
+    // Browser engine preloadNext is a no-op, but call it for consistency
+    if (this.browserEngine.preloadNext) {
+      await this.browserEngine.preloadNext(text, options)
+    }
+  }
+
+  hasPreloaded(lang: string): boolean {
+    const engine = this.getEngineForLang(lang)
+    return engine.hasPreloaded ? engine.hasPreloaded() : false
+  }
+
   cancel(): void {
     this.piperEngine.cancel()
     this.browserEngine.cancel()
