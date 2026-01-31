@@ -159,22 +159,55 @@ export function useTts(options: UseTtsOptions) {
           isResumingRef.current = false
           onSentenceStart?.(sentence)
 
-          // Preload next sentence in background while current sentence is playing
+          // Preload next sentence(s) in background while current sentence is playing
           if (index < sentences.length - 1) {
             const nextSentence = sentences[index + 1]
             if (nextSentence && nextSentence.text.trim()) {
-              const nextTtsOptions: TtsOptions = {
-                voice: selectedVoice || undefined,
-                rate,
-              }
-              if (usePiper && engineManager) {
-                engineManager.preloadNext(nextSentence.text.trim(), detectedLang, nextTtsOptions).catch((err) => {
+              // Skip preloading if text only contains curly quotes
+              const nextText = nextSentence.text.trim()
+              const nextTextWithoutCurlyQuotes = nextText.replace(/[""]/g, '').trim()
+              if (nextTextWithoutCurlyQuotes && nextTextWithoutCurlyQuotes.length > 0) {
+                const nextTtsOptions: TtsOptions = {
+                  voice: selectedVoice || undefined,
+                  rate,
+                }
+                
+                // Preload next sentence
+                const preloadNext = async () => {
+                  if (usePiper && engineManager) {
+                    await engineManager.preloadNext(nextText, detectedLang, nextTtsOptions)
+                  } else if (engineRef.current?.preloadNext) {
+                    await engineRef.current.preloadNext(nextText, nextTtsOptions)
+                  }
+                }
+                
+                preloadNext().catch((err) => {
                   console.warn('[useTts] Failed to preload next sentence:', err)
                 })
-              } else if (engineRef.current?.preloadNext) {
-                engineRef.current.preloadNext(nextSentence.text.trim(), nextTtsOptions).catch((err) => {
-                  console.warn('[useTts] Failed to preload next sentence:', err)
-                })
+                
+                // If next sentence is short (< 40 chars), also preload the sentence after that
+                if (nextTextWithoutCurlyQuotes.length < 40 && index + 2 < sentences.length) {
+                  const nextNextSentence = sentences[index + 2]
+                  if (nextNextSentence && nextNextSentence.text.trim()) {
+                    const nextNextText = nextNextSentence.text.trim()
+                    const nextNextTextWithoutCurlyQuotes = nextNextText.replace(/[""]/g, '').trim()
+                    if (nextNextTextWithoutCurlyQuotes && nextNextTextWithoutCurlyQuotes.length > 0) {
+                      // Preload the sentence after next (after a small delay to not overload)
+                      setTimeout(() => {
+                        const preloadNextNext = async () => {
+                          if (usePiper && engineManager) {
+                            await engineManager.preloadNext(nextNextText, detectedLang, nextTtsOptions)
+                          } else if (engineRef.current?.preloadNext) {
+                            await engineRef.current.preloadNext(nextNextText, nextTtsOptions)
+                          }
+                        }
+                        preloadNextNext().catch((err) => {
+                          console.warn('[useTts] Failed to preload next-next sentence:', err)
+                        })
+                      }, 100) // Small delay to prioritize next sentence
+                    }
+                  }
+                }
               }
             }
           }
@@ -256,6 +289,28 @@ export function useTts(options: UseTtsOptions) {
             setTimeout(() => {
               playSentence(index + 1).catch((err) => {
                 console.error('Failed to play next sentence after empty:', err)
+              })
+            }, 100)
+          } else {
+            setIsPlaying(false)
+            isPlayingRef.current = false
+            if (index === sentences.length - 1) {
+              onChapterEnd?.()
+            }
+          }
+          return
+        }
+
+        // Check if text only contains curly quotes (") and (")
+        const textWithoutCurlyQuotes = textToSpeak.replace(/[""]/g, '').trim()
+        if (!textWithoutCurlyQuotes || textWithoutCurlyQuotes.length === 0) {
+          console.warn('[useTts] Sentence only contains curly quotes, skipping:', index)
+          // Skip sentences with only curly quotes and continue to next
+          if (isPlayingRef.current && index < sentences.length - 1) {
+            // Small delay before playing next to avoid rapid fire
+            setTimeout(() => {
+              playSentence(index + 1).catch((err) => {
+                console.error('Failed to play next sentence after curly quotes:', err)
               })
             }, 100)
           } else {

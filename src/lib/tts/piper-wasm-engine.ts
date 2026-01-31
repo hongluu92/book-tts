@@ -28,6 +28,8 @@ export class PiperWasmEngine implements TtsEngine {
   private currentBuffer: AudioBuffer | null = null
   private nextBuffer: AudioBuffer | null = null // Preloaded buffer for next sentence
   private nextText: string | null = null // Text of preloaded sentence
+  private nextNextBuffer: AudioBuffer | null = null // Preloaded buffer for sentence after next (for short sentences)
+  private nextNextText: string | null = null // Text of preloaded sentence after next
   private onDownloadProgress: ((progress: ModelDownloadProgress) => void) | null = null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private session: any = null
@@ -123,6 +125,14 @@ export class PiperWasmEngine implements TtsEngine {
       throw new Error('Piper voice not initialized. Call initVoice() first.')
     }
 
+    // Check if text only contains curly quotes - skip silently
+    const normalizedText = text.trim()
+    const textWithoutCurlyQuotes = normalizedText.replace(/[""]/g, '').trim()
+    if (!textWithoutCurlyQuotes || textWithoutCurlyQuotes.length === 0) {
+      // Skip silently - just resolve immediately
+      return Promise.resolve()
+    }
+
     // Queue the speak request if already speaking
     return new Promise<void>((resolve, reject) => {
       const queued: QueuedSpeak = { text, options, resolve, reject }
@@ -164,7 +174,24 @@ export class PiperWasmEngine implements TtsEngine {
         audioBuffer = this.nextBuffer
         this.nextBuffer = null
         this.nextText = null
+        
+        // Move nextNext to next if available
+        if (this.nextNextBuffer && this.nextNextText) {
+          this.nextBuffer = this.nextNextBuffer
+          this.nextText = this.nextNextText
+          this.nextNextBuffer = null
+          this.nextNextText = null
+        }
+        
         console.log('[PiperWasmEngine] Using preloaded audio for:', normalizedText.substring(0, 50))
+      } else if (this.nextNextBuffer && this.nextNextText && this.nextNextText.trim() === normalizedText) {
+        // Use nextNext buffer (skip next)
+        audioBuffer = this.nextNextBuffer
+        this.nextNextBuffer = null
+        this.nextNextText = null
+        this.nextBuffer = null
+        this.nextText = null
+        console.log('[PiperWasmEngine] Using preloaded nextNext audio for:', normalizedText.substring(0, 50))
       } else {
         // Generate new audio
         try {
@@ -248,25 +275,41 @@ export class PiperWasmEngine implements TtsEngine {
       return
     }
 
-    // Don't preload if we already have this text preloaded
-    if (this.nextText && this.nextText.trim() === normalizedText && this.nextBuffer) {
+    // Skip preloading if text only contains curly quotes
+    const textWithoutCurlyQuotes = normalizedText.replace(/[""]/g, '').trim()
+    if (!textWithoutCurlyQuotes || textWithoutCurlyQuotes.length === 0) {
+      return
+    }
+
+    // Check if already preloaded in next or nextNext
+    if ((this.nextText && this.nextText.trim() === normalizedText && this.nextBuffer) ||
+        (this.nextNextText && this.nextNextText.trim() === normalizedText && this.nextNextBuffer)) {
       return
     }
 
     try {
-      // Clear old preload
-      this.nextBuffer = null
-      this.nextText = null
-
-      // Generate audio in background
-      const blob = await this.session.predict(normalizedText)
-      const arrayBuffer = await blob.arrayBuffer()
-      const ctx = this.getAudioContext()
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
-      
-      this.nextBuffer = audioBuffer
-      this.nextText = normalizedText
-      console.log('[PiperWasmEngine] Preloaded audio for:', normalizedText.substring(0, 50))
+      // If nextBuffer is already occupied, preload into nextNextBuffer
+      if (this.nextBuffer && this.nextText) {
+        // Preload into nextNextBuffer
+        const blob = await this.session.predict(normalizedText)
+        const arrayBuffer = await blob.arrayBuffer()
+        const ctx = this.getAudioContext()
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+        
+        this.nextNextBuffer = audioBuffer
+        this.nextNextText = normalizedText
+        console.log('[PiperWasmEngine] Preloaded nextNext audio for:', normalizedText.substring(0, 50))
+      } else {
+        // Preload into nextBuffer
+        const blob = await this.session.predict(normalizedText)
+        const arrayBuffer = await blob.arrayBuffer()
+        const ctx = this.getAudioContext()
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+        
+        this.nextBuffer = audioBuffer
+        this.nextText = normalizedText
+        console.log('[PiperWasmEngine] Preloaded audio for:', normalizedText.substring(0, 50))
+      }
     } catch (error) {
       console.warn('[PiperWasmEngine] Failed to preload audio:', error)
       // Don't throw - preload failure shouldn't break playback
@@ -332,6 +375,8 @@ export class PiperWasmEngine implements TtsEngine {
     this.cancel()
     this.nextBuffer = null
     this.nextText = null
+    this.nextNextBuffer = null
+    this.nextNextText = null
     if (this.audioContext) {
       this.audioContext.close()
       this.audioContext = null
