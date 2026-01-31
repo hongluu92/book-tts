@@ -476,7 +476,9 @@ function ReaderContent() {
       // Check if this span has a child span[data-sent] that also contains the target
       const childSpans = span.querySelectorAll('span[data-sent]')
       let hasContainingChild = false
-      for (const childSpan of childSpans) {
+      // Convert NodeList to Array for compatibility with es5 target
+      const childSpansArray = Array.from(childSpans)
+      for (const childSpan of childSpansArray) {
         if ((childSpan as HTMLElement).contains(target)) {
           hasContainingChild = true
           break

@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev -H 0.0.0.0",
     "build": "next build",
-    "build:deploy": "BASE_PATH=/book-tts next build",
+    "build:deploy": "cross-env BASE_PATH=/book-tts next build",
     "start": "npx serve@latest out -l 3000 --single",
     "lint": "next lint",
     "test:epub-html": "node scripts/check-epub-html.cjs",
@@ -34,6 +34,7 @@
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
     "autoprefixer": "^10.4.17",
+    "cross-env": "^10.1.0",
     "dotenv": "^17.2.3",
     "eslint": "^8.56.0",
     "eslint-config-next": "14.1.0",
