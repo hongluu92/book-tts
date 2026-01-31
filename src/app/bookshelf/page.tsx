@@ -4,9 +4,11 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { BookOpen, Upload, Trash2 } from 'lucide-react'
 import OfflineIndicator from '@/components/OfflineIndicator'
-import DriveSyncButton from '@/components/DriveSyncButton'
+import FirebaseSyncButton from '@/components/FirebaseSyncButton'
 import { db, BookLocal } from '@/storage/db'
 import { deleteLocalBook, importLocalEpub } from '@/lib/localLibrary'
+import { useFirebaseSync } from '@/hooks/useFirebaseSync'
+import { getCurrentUser } from '@/lib/firebaseAuth'
 
 interface BookWithCover extends BookLocal {
   coverUrl?: string | null
@@ -19,6 +21,7 @@ export default function BookshelfPageV2() {
   const [error, setError] = useState<string | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
   const [failedCovers, setFailedCovers] = useState<Set<string>>(new Set())
+  const { autoPushBookshelf } = useFirebaseSync()
 
   const loadBooks = async () => {
     const list = await db.books.orderBy('addedAtMs').reverse().toArray()
@@ -69,6 +72,13 @@ export default function BookshelfPageV2() {
       const book = await importLocalEpub(file)
       // Immediately reflect new book in local state (v2 behaves like v1 UX)
       setBooks((prev) => [book, ...prev])
+      
+      // Auto-push to Firebase if authenticated and has synced before
+      const user = getCurrentUser()
+      if (user) {
+        const allBooks = await db.books.toArray()
+        autoPushBookshelf(allBooks)
+      }
     } catch (err: any) {
       setError(err?.message || 'Import failed')
     } finally {
@@ -81,6 +91,13 @@ export default function BookshelfPageV2() {
     try {
       await deleteLocalBook(bookFingerprint)
       await loadBooks()
+      
+      // Auto-push to Firebase if authenticated and has synced before
+      const user = getCurrentUser()
+      if (user) {
+        const allBooks = await db.books.toArray()
+        autoPushBookshelf(allBooks)
+      }
     } catch (err) {
       console.error(err)
       setError('Failed to delete book')
@@ -98,7 +115,7 @@ export default function BookshelfPageV2() {
           </div>
           <div className="flex items-center gap-4">
             <OfflineIndicator />
-            <DriveSyncButton />
+            <FirebaseSyncButton />
           </div>
         </div>
       </header>

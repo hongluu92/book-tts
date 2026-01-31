@@ -9,6 +9,8 @@ import { useTts } from '@/hooks/useTts'
 import { useSentenceHighlight } from '@/hooks/useSentenceHighlight'
 import { useChapterLoader } from '@/hooks/useChapterLoader'
 import { useReaderSettings } from '@/hooks/useReaderSettings'
+import { useFirebaseSync } from '@/hooks/useFirebaseSync'
+import { getCurrentUser } from '@/lib/firebaseAuth'
 import TtsControls from '@/components/TtsControls'
 import ReaderSettings from '@/components/ReaderSettings'
 import ChapterNavigation from '@/components/ChapterNavigation'
@@ -24,6 +26,9 @@ function ReaderContent() {
 
   // Reader settings with localStorage persistence
   const { fontSize, setFontSize, fontFamily, setFontFamily, theme, setTheme, showSettings, setShowSettings } = useReaderSettings()
+  
+  // Firebase sync hook
+  const { autoPushProgress, autoPushBookmarks } = useFirebaseSync()
 
   const [book, setBook] = useState<BookLocal | null>(null)
   const [chapters, setChapters] = useState<V2Chapter[]>([])
@@ -202,6 +207,12 @@ function ReaderContent() {
         }
         setProgress(updated)
         db.v2Progress.put(updated)
+        
+        // Auto-push to Firebase if authenticated
+        const user = getCurrentUser()
+        if (user) {
+          autoPushProgress(updated)
+        }
       }
     },
     onProgress: () => { },
@@ -604,6 +615,15 @@ function ReaderContent() {
           span.classList.remove('sentence-bookmarked')
         }
 
+        // Auto-push to Firebase if authenticated
+        const user = getCurrentUser()
+        if (user) {
+          const allBookmarks = await db.sentenceBookmarks
+            .where('[bookFingerprint+chapterId]')
+            .equals([bookFingerprint, currentChapter.chapterId])
+            .toArray()
+          autoPushBookmarks(bookFingerprint, allBookmarks)
+        }
       }
       setContextMenu(null)
       return
@@ -621,8 +641,19 @@ function ReaderContent() {
     await db.sentenceBookmarks.add(bookmark)
     // Reload bookmarks for this chapter
     setBookmarks((prev) => new Set(prev).add(contextMenu.sentenceIndex))
+    
+    // Auto-push to Firebase if authenticated
+    const user = getCurrentUser()
+    if (user) {
+      const allBookmarks = await db.sentenceBookmarks
+        .where('[bookFingerprint+chapterId]')
+        .equals([bookFingerprint, currentChapter.chapterId])
+        .toArray()
+      autoPushBookmarks(bookFingerprint, allBookmarks)
+    }
+    
     setContextMenu(null)
-  }, [contextMenu, currentChapter, bookFingerprint, sentences])
+  }, [contextMenu, currentChapter, bookFingerprint, sentences, autoPushBookmarks])
 
   const handleNavigateToBookmark = useCallback((chapterId: string, sentenceIndex: number) => {
     // Check if we are already in the correct chapter
