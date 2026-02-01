@@ -168,6 +168,35 @@ export class TtsEngineManager {
     }
   }
 
+  /**
+   * Pre-initialize the voice for a given language in the background.
+   * This prepares the TTS engine so that the first speak() call is faster.
+   */
+  async preloadVoice(lang: string): Promise<void> {
+    if (this.preference === 'browser') {
+      // Browser engine doesn't need pre-initialization
+      return
+    }
+
+    const piperVoice = PIPER_VOICES.find((v) => v.lang === lang)
+    if (!piperVoice) {
+      return
+    }
+
+    // Only preload if the voice is already stored/downloaded
+    if (!this.piperReadyVoices.has(piperVoice.voiceId)) {
+      return
+    }
+
+    try {
+      // Pre-initialize the voice in the background
+      await this.piperEngine.initVoice(piperVoice.voiceId)
+      console.log(`[TtsEngineManager] Pre-initialized voice for language: ${lang}`)
+    } catch (error) {
+      console.warn(`[TtsEngineManager] Failed to preload voice for ${lang}:`, error)
+    }
+  }
+
   hasPreloaded(lang: string): boolean {
     const engine = this.getEngineForLang(lang)
     return engine.hasPreloaded ? engine.hasPreloaded() : false

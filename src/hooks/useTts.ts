@@ -11,12 +11,15 @@ interface UseTtsOptions {
   onSentenceEnd?: (sentence: Sentence) => void
   onProgress?: (sentenceIndex: number) => void
   onChapterEnd?: () => void
+  onPlayStart?: () => void
+  onError?: (error: Error) => void
+  onStop?: () => void
   engineManager?: TtsEngineManager | null
   detectedLang?: string
 }
 
 export function useTts(options: UseTtsOptions) {
-  const { sentences, onSentenceStart, onSentenceEnd, onProgress, onChapterEnd, engineManager, detectedLang = 'vi' } = options
+  const { sentences, onSentenceStart, onSentenceEnd, onProgress, onChapterEnd, onPlayStart, onError, onStop, engineManager, detectedLang = 'vi' } = options
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
@@ -256,6 +259,11 @@ export function useTts(options: UseTtsOptions) {
           // Release lock
           isPlayingSentenceRef.current = false
 
+          // Notify error callback (for hiding loading indicator)
+          if (!error.message.includes('interrupted') && !error.message.includes('canceled')) {
+            onError?.(error)
+          }
+
           if (isResumingRef.current) return
 
           if (!error.message.includes('interrupted') && !error.message.includes('canceled')) {
@@ -274,6 +282,10 @@ export function useTts(options: UseTtsOptions) {
           } else {
             setIsPlaying(false)
             isPlayingRef.current = false
+            // Hide loading if speech never started
+            if (!speechStarted) {
+              onError?.(error)
+            }
           }
         },
       }
@@ -464,6 +476,9 @@ export function useTts(options: UseTtsOptions) {
       loadAndSelectVoice()
     }
 
+    // Notify that play is starting (for loading indicator)
+    onPlayStart?.()
+
     if (isPaused) {
       console.log('[useTts] Resuming by restarting current sentence', currentSentenceIndex)
       isResumingRef.current = true
@@ -480,7 +495,7 @@ export function useTts(options: UseTtsOptions) {
       isPlayingRef.current = true
       playSentence(currentSentenceIndex)
     }
-  }, [isPaused, currentSentenceIndex, playSentence, voices.length, voicesLoading, loadAndSelectVoice, usePiper, engineManager])
+  }, [isPaused, currentSentenceIndex, playSentence, voices.length, voicesLoading, loadAndSelectVoice, usePiper, engineManager, onPlayStart])
 
   const pause = useCallback(() => {
     if (usePiper && engineManager) {
@@ -501,7 +516,9 @@ export function useTts(options: UseTtsOptions) {
     setIsPlaying(false)
     setIsPaused(false)
     isPlayingRef.current = false
-  }, [usePiper, engineManager])
+    // Notify stop callback (for hiding loading indicator)
+    onStop?.()
+  }, [usePiper, engineManager, onStop])
 
   const seek = useCallback(
     (index: number) => {
@@ -522,9 +539,11 @@ export function useTts(options: UseTtsOptions) {
       stop()
       setCurrentSentenceIndex(index)
       isPlayingRef.current = true
+      // Notify that play is starting (for loading indicator)
+      onPlayStart?.()
       playSentence(index)
     },
-    [sentences.length, stop, playSentence],
+    [sentences.length, stop, playSentence, onPlayStart],
   )
 
   const prev = useCallback(() => {

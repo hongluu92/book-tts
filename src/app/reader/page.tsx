@@ -54,6 +54,8 @@ function ReaderContent() {
   } | null>(null)
   const [bookmarks, setBookmarks] = useState<Set<number>>(new Set())
   const [showBookmarks, setShowBookmarks] = useState(false)
+  const [restoringPosition, setRestoringPosition] = useState(false)
+  const [ttsLoading, setTtsLoading] = useState(false)
 
   const currentChapter = chapters[currentChapterIndex] || null
 
@@ -63,7 +65,7 @@ function ReaderContent() {
   const prevSentenceIndexRef = useRef<number>(-1) // Track previous sentence index
 
   // Helper function to scroll to a sentence element
-  const scrollToSentence = useCallback((markerId: string) => {
+  const scrollToSentence = useCallback((markerId: string, instant: boolean = false) => {
     if (!contentRef.current || !mainRef.current) {
       return
     }
@@ -91,15 +93,17 @@ function ReaderContent() {
       // Calculate target scroll to center element
       const targetScrollTop = elementOffsetTop - containerOffsetTop - (containerHeight / 2) + (elementHeight / 2)
 
+      const scrollBehavior = instant ? ('auto' as ScrollBehavior) : 'smooth'
+
       if (targetScrollTop >= 0 && Math.abs(targetScrollTop - mainRef.current.scrollTop) > 10) {
         mainRef.current.scrollTo({
           top: targetScrollTop,
-          behavior: 'smooth',
+          behavior: scrollBehavior,
         })
       } else {
         // Fallback to scrollIntoView
         targetElement.scrollIntoView({
-          behavior: 'smooth',
+          behavior: scrollBehavior,
           block: 'center',
           inline: 'nearest',
         })
@@ -205,7 +209,14 @@ function ReaderContent() {
     isSupported,
   } = useTts({
     sentences,
+    onPlayStart: () => {
+      // Hiển thị loading khi bắt đầu play
+      setTtsLoading(true)
+    },
     onSentenceStart: (sentence) => {
+      // Ẩn loading khi TTS thực sự bắt đầu phát
+      setTtsLoading(false)
+      
       if (currentChapter) {
         const updated: V2Progress = {
           bookFingerprint,
@@ -236,6 +247,14 @@ function ReaderContent() {
       }
     },
     onProgress: () => { },
+    onError: () => {
+      // Ẩn loading khi có lỗi
+      setTtsLoading(false)
+    },
+    onStop: () => {
+      // Ẩn loading khi stop
+      setTtsLoading(false)
+    },
     engineManager,
     detectedLang: 'vi',
     onChapterEnd: () => {
@@ -435,6 +454,9 @@ function ReaderContent() {
         return
       }
 
+      // Hiển thị loading khi bắt đầu khôi phục vị trí
+      setRestoringPosition(true)
+
       // Đợi useTts hook reset xong (thường reset về 0 khi sentences thay đổi)
       // Đợi đủ lâu để đảm bảo useTts đã reset và DOM đã render
       const timer = setTimeout(() => {
@@ -443,6 +465,7 @@ function ReaderContent() {
           if (!targetSentence) {
             console.warn('[v2 Reader] Target sentence not found:', progress.sentenceIndex)
             hasRestoredPositionRef.current = true
+            setRestoringPosition(false)
             return
           }
 
@@ -450,19 +473,32 @@ function ReaderContent() {
           // Nếu người dùng đang play, họ sẽ bấm play lại và sẽ đọc từ vị trí này
           setSentenceIndex(progress.sentenceIndex)
 
-          // Scroll đến vị trí đó trong DOM
+          // Scroll đến vị trí đó trong DOM ngay lập tức (không smooth) khi load trang lần đầu
           setTimeout(() => {
             const markerElement = document.getElementById(targetSentence.markerId)
             if (markerElement && mainRef.current) {
-              markerElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              // Dùng instant scroll khi khôi phục vị trí lần đầu để hiển thị ngay
+              markerElement.scrollIntoView({ behavior: 'auto', block: 'center' })
+              
+              // Ẩn loading sau khi đã scroll xong
+              setTimeout(() => {
+                setRestoringPosition(false)
+              }, 50)
+            } else {
+              setRestoringPosition(false)
             }
           }, 100)
 
           hasRestoredPositionRef.current = true
+        } else {
+          setRestoringPosition(false)
         }
       }, 600) // Tăng thời gian đợi để đảm bảo useTts đã reset xong
 
-      return () => clearTimeout(timer)
+      return () => {
+        clearTimeout(timer)
+        setRestoringPosition(false)
+      }
     }
   }, [progress, sentences.length, currentChapter, seek, currentSentenceIndex, setSentenceIndex])
 
@@ -783,6 +819,19 @@ function ReaderContent() {
     }
   }, [engineManager, piperInitDone, piperReady, piperDownloading])
 
+  // Preload TTS engine voice in background when page loads (for faster first play)
+  useEffect(() => {
+    if (!engineManager || !piperInitDone) return
+
+    // Preload voice for detected language (Vietnamese) in the background
+    // The preloadVoice method will check if the voice is available and only preload if needed
+    const detectedLang = 'vi'
+    engineManager.preloadVoice(detectedLang).catch(err => {
+      // Silently fail - preload is best-effort, not critical
+      console.warn('[Reader] Failed to preload TTS voice:', err)
+    })
+  }, [engineManager, piperInitDone])
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -902,6 +951,26 @@ function ReaderContent() {
           onTouchMove={handleTouchMove}
         />
       </main>
+
+      {/* Loading overlay khi đang khôi phục vị trí */}
+      {restoringPosition && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-300 border-t-blue-600 dark:border-gray-600 dark:border-t-blue-400"></div>
+            <div className="text-sm text-gray-600 dark:text-gray-400">Đang tải vị trí đọc...</div>
+          </div>
+        </div>
+      )}
+
+      {/* Loading overlay khi đang khởi động TTS */}
+      {ttsLoading && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-300 border-t-blue-600 dark:border-gray-600 dark:border-t-blue-400"></div>
+            <div className="text-sm text-gray-600 dark:text-gray-400">Đang khởi động TTS...</div>
+          </div>
+        </div>
+      )}
 
       <div className="fixed bottom-0 left-0 right-0 z-40 bg-background border-t border-border shadow-lg">
         <TtsControls
